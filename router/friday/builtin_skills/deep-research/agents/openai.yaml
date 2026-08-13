@@ -1,0 +1,4 @@
+interface:
+  display_name: "Deep Research"
+  short_description: "Run source-grounded local deep research"
+  default_prompt: "Use $deep-research to investigate this topic and produce a cited report."

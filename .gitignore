@@ -1,0 +1,92 @@
+# macOS / editor files
+.DS_Store
+._*
+.AppleDouble
+.LSOverride
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Local assistant settings
+.claude/settings.local.json
+.codex/
+
+# Python bytecode, environments, and build output
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+env/
+ENV/
+.eggs/
+*.egg-info/
+build/
+dist/
+wheels/
+
+# Test, lint, type-check, and coverage caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyre/
+.pytype/
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.ipynb_checkpoints/
+
+# Secrets and machine-local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Temporary and backup files
+*.log
+*.bak
+*.backup
+*.orig
+*.tmp
+
+# build-up local caches and state
+/.embed_cache.json
+/.friday_history
+/.friday_traces.jsonl
+/state.json
+
+# Personal sessions, papers, memories, and generated artifacts
+/calendar/
+/data/
+/export/
+/inbox/
+/library/
+/logs/
+/papers/
+/prompts/
+/sessions/
+/skills/
+/study/
+/templates/
+/trash/
+/workspace/
+
+# Downloaded third-party skill collections
+/vendor/
+
+# Local model artifacts
+*.gguf
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.onnx

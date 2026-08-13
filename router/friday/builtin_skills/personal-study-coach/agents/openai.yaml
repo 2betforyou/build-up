@@ -1,0 +1,4 @@
+interface:
+  display_name: "Personal Study Coach"
+  short_description: "Socratic study sessions with verified notes"
+  default_prompt: "Use $personal-study-coach to help me study this topic through explanation, examples, and counterexamples."

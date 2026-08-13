@@ -1,0 +1,4 @@
+interface:
+  display_name: "Paper PDF Translation"
+  short_description: "Translate research PDFs into precise Korean"
+  default_prompt: "Use $paper-pdf-translation to translate this research PDF into Korean and explain its key meaning."

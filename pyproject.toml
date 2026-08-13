@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "build-up-local"
+version = "0.1.0"
+description = "Local-first deep research agent and personal study coach"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "ddgs>=9.0",
+  "icalendar>=6.1",
+  "pdfminer.six>=20231228",
+  "requests>=2.31,<3",
+  "rich>=13.7,<15",
+]
+
+[project.scripts]
+buildup = "friday:main"
+# Compatibility alias for existing local installs and scripts.
+night = "friday:main"
+
+[project.optional-dependencies]
+dev = ["ruff>=0.6"]
+
+[tool.setuptools]
+package-dir = {"" = "router"}
+
+[tool.setuptools.package-data]
+friday = [
+  "builtin_skills/*/SKILL.md",
+  "builtin_skills/*/agents/*.yaml",
+  "builtin_skills/*/references/*.md",
+]
+
+[tool.setuptools.packages.find]
+where = ["router"]
+include = ["friday*"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 110

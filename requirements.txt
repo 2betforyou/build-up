@@ -1,0 +1,5 @@
+ddgs>=9.0
+icalendar>=6.1
+pdfminer.six>=20231228
+requests>=2.31,<3
+rich>=13.7,<15
