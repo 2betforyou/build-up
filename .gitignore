@@ -13,6 +13,13 @@
 .claude/settings.local.json
 .codex/
 
+# Internal agent instructions and development notes
+/AGENTS.md
+/CLAUDE.md
+/Friday_Project_Summary.md
+/Friday_Technical_Design.md
+/REDESIGN_LOG.md
+
 # Python bytecode, environments, and build output
 __pycache__/
 *.py[cod]
