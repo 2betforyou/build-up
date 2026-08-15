@@ -471,6 +471,7 @@ class ResearchEngine:
         return results
 
     def _perform_search(self, query: str) -> Tuple[List[Dict[str, Any]], str]:
+        self.status(f"검색: {query} · {self._budget_suffix()}")
         if self.search_fn:
             rows, provider = self.search_fn(
                 query, self.cfg, self.session, max_results=self.max_results_per_search
@@ -619,6 +620,7 @@ class ResearchEngine:
         return accepted
 
     def _read_url(self, url: str) -> ReaderResult:
+        self.status(f"읽는 중: {urlparse(url).netloc or url} · {self._budget_suffix()}")
         if self.reader_fn:
             value = self.reader_fn(url)
             if isinstance(value, ReaderResult):
@@ -1089,6 +1091,9 @@ class ResearchEngine:
         self._assert_runtime()
         self.state.budget.consume_model_call()
         self.store.checkpoint(self.state, event="model_call_started")
+        # Model calls are the longest silent stretches, and a reviewer-model
+        # swap can stall for minutes on machines that cannot hold both models.
+        self.status(f"{phase}: {model} 응답 대기 중 · {self._budget_suffix()}")
         if self.chat_fn is None:
             from buildup.ollama import chat
 
@@ -1126,6 +1131,15 @@ class ResearchEngine:
             and self.state.budget.model_calls_used + reserve < self.state.budget.max_model_calls
             and len(self.state.sources) < self.state.budget.max_sources
             and self.state.budget.runtime_available()
+        )
+
+    def _budget_suffix(self) -> str:
+        """Compact consumption counters appended to every status message."""
+        budget = self.state.budget
+        return (
+            f"검색 {budget.searches_used}/{budget.max_searches} · "
+            f"소스 {len(self.state.sources)}/{budget.max_sources} · "
+            f"모델 {budget.model_calls_used}/{budget.max_model_calls}"
         )
 
     def _assert_runtime(self) -> None:

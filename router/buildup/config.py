@@ -22,6 +22,8 @@ class BuildupConfig:
     main_model: str = "qwen3.8:27b"
     research_model: str = "qwen3.8:27b"
     reviewer_model: str = "deepseek-r1:32b"
+    # Korean-only answers by default; opt in to the English companion section.
+    english_brief: bool = False
     coder_model: str = "qwen3.8:27b"
     embed_model: str = "nomic-embed-text"
     struct_model: str = "qwen2.5:1.5b"
@@ -330,6 +332,7 @@ def load_config() -> BuildupConfig:
         main_model=_env("BUILDUP_MAIN_MODEL", "qwen3.8:27b"),
         research_model=_env("BUILDUP_RESEARCH_MODEL", "qwen3.8:27b"),
         reviewer_model=_env("BUILDUP_REVIEWER_MODEL", "deepseek-r1:32b"),
+        english_brief=_env_bool("BUILDUP_ENGLISH_BRIEF", False),
         coder_model=_env("BUILDUP_CODER_MODEL", "qwen3.8:27b"),
         embed_model=_env("BUILDUP_EMBED_MODEL", "nomic-embed-text"),
         struct_model=_env("BUILDUP_STRUCT_MODEL", "qwen2.5:1.5b"),

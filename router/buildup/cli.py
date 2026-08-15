@@ -52,11 +52,13 @@ from buildup.paths import (
     resolve_path,
 )
 from buildup.prompts import system_fast
+from buildup.prompts import bilingual_clause, set_english_brief
 from buildup.rendering import (
     console,
     render_answer,
     render_diff,
     render_info,
+    StatusLine,
 )
 from buildup.search import format_search_results, web_search
 from buildup.shell import InteractiveShell
@@ -348,6 +350,7 @@ def main() -> None:
     # Parsing comes first so read-only metadata commands such as --help and
     # --version never create runtime directories or log files.
     cfg = load_config()
+    set_english_brief(cfg.english_brief)
     for d in cfg.all_dirs:
         d.mkdir(parents=True, exist_ok=True)
 
@@ -482,7 +485,7 @@ def main() -> None:
                     )
                     summary = chat(
                         session, cfg, cfg.fast_model,
-                        [{"role": "system", "content": "작업 이력을 간결하게 요약하라. 한국어 먼저, 마지막에 짧은 English Brief를 붙여라."},
+                        [{"role": "system", "content": f"작업 이력을 간결하게 요약하라.{bilingual_clause()}"},
                          {"role": "user", "content": f"요약:\n{log_text}"}],
                         keep_alive="2m", logger=logger, display_thinking=True,
                     )
@@ -588,23 +591,24 @@ def main() -> None:
             if not query and not args.resume:
                 raise ValueError("research 주제를 입력하세요.")
             research_session_id = new_session_id()
-            result = run_deep_research(
-                query,
-                cfg,
-                session,
-                logger,
-                job_id=jid,
-                max_results=args.max_results_per_search,
-                status=lambda msg: console.print(f"[dim]{msg}[/dim]"),
-                session_id=research_session_id,
-                workspace_key=workspace_key_for(cfg, jid) if jid else "",
-                depth=args.depth,
-                resume=args.resume or "",
-                max_rounds=args.max_rounds,
-                max_searches=args.max_searches,
-                max_sources=args.max_sources,
-                ingest_knowledge=False if args.no_wiki else None,
-            )
+            with StatusLine() as status_line:
+                result = run_deep_research(
+                    query,
+                    cfg,
+                    session,
+                    logger,
+                    job_id=jid,
+                    max_results=args.max_results_per_search,
+                    status=status_line.update,
+                    session_id=research_session_id,
+                    workspace_key=workspace_key_for(cfg, jid) if jid else "",
+                    depth=args.depth,
+                    resume=args.resume or "",
+                    max_rounds=args.max_rounds,
+                    max_searches=args.max_searches,
+                    max_sources=args.max_sources,
+                    ingest_knowledge=False if args.no_wiki else None,
+                )
             query = result.query
             messages = [
                 {"role": "user", "content": f"[deep research] {query}", "kind": "research"},
@@ -829,13 +833,14 @@ def main() -> None:
         elif args.command == "translate":
             current_job = get_current_job(cfg, required=False)
             target = resolve_translation_target(args.source, cfg, current_job=current_job)
-            result = translate_paper_pdf(
-                target,
-                cfg,
-                session,
-                logger,
-                status=lambda msg: console.print(f"[dim]{msg}[/dim]"),
-            )
+            with StatusLine() as status_line:
+                result = translate_paper_pdf(
+                    target,
+                    cfg,
+                    session,
+                    logger,
+                    status=status_line.update,
+                )
             render_info(
                 "Paper Translation",
                 f"{result.output_path}\n{result.page_count} pages · {result.model_calls} model call(s)",

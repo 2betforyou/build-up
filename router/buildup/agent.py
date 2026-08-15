@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import requests
 
 from buildup.config import BuildupConfig
-from buildup.prompts import system_main
+from buildup.prompts import bilingual_clause, system_main
 
 AGENT_MAX_STEPS = 8
 
@@ -161,7 +161,7 @@ AGENT_SYSTEM_PROMPT = """\
      사용자가 메모리 압축/이어보기/상태 저장을 요청하면 refresh_paper_memory를 사용한다.
 3. 사용자가 일정을 파일에 저장하길 원하면 calendar_list로 데이터를 먼저 가져온 후 write_file하라.
 4. write_file의 content는 실제 파일에 저장될 텍스트여야 한다 — 요청이나 지시가 아니다.
-5. 작업이 완료되면 반드시 answer로 결과를 보고하라. 사용자가 한 언어만 요청하지 않았다면 한국어 답변 뒤에 짧은 English Brief를 포함하라.
+5. 작업이 완료되면 반드시 answer로 결과를 보고하라.{bilingual_rule}
 6. 확실하지 않은 내용을 지어내지 마라.
 7. 논문 URL/arXiv/새 PDF 요청: load_paper_source를 우선 사용하라. 이미 job 안의 파일이면 load_paper도 가능하다.
 8. 논문 질문 시 논문에 없는 내용을 지어내지 마라. "이 논문에서 명시하지 않습니다"라고 답하라.
@@ -719,6 +719,7 @@ def run_agent_legacy(
     Returns the final answer string to display to the user.
     """
     ctx = _build_context(cfg)
+    ctx["bilingual_rule"] = bilingual_clause()
     if exemplar_index is not None:
         ctx["exemplar_context"] = exemplar_index.retrieve(user_input)
     system_prompt = AGENT_SYSTEM_PROMPT.format(**ctx)

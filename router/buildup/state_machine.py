@@ -698,7 +698,7 @@ class PlanStateMachine:
     def _handle_completing(self) -> MachineState:
         """Summarize all outcomes into a natural user-facing response, streamed."""
         from buildup.ollama import chat_stream
-        from buildup.prompts import system_fast, system_research
+        from buildup.prompts import bilingual_clause, system_fast, system_research
         from buildup.rendering import render_streaming_answer
 
         # If only skipped steps, give a simple response
@@ -717,8 +717,7 @@ class PlanStateMachine:
         results_text = "\n".join(result_lines)
         prompt = (
             f"다음 실행 결과를 사용자에게 자연스럽게 요약해라. "
-            f"완료된 작업과 결과를 명확히 전달하라. "
-            f"사용자가 특정 언어만 요청하지 않았다면 한국어 답변 뒤에 짧은 English Brief를 붙여라.\n\n"
+            f"완료된 작업과 결과를 명확히 전달하라.{bilingual_clause()}\n\n"
             f"사용자 요청: {self._user_input}\n\n"
             f"실행 결과:\n{results_text}"
         )

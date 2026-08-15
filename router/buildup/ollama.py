@@ -349,11 +349,18 @@ def _repair_final_answer(
     keep_alive: str,
 ) -> str:
     """Ask the model once more for final-only output when it returned only thinking."""
+    from buildup.prompts import english_brief_enabled
+
+    english_brief_rule = (
+        " Unless the user requested one specific language, answer in Korean"
+        " first and add a concise English Brief."
+        if english_brief_enabled()
+        else ""
+    )
     repair_prompt = f"""\
 Your previous response contained internal reasoning but no final answer.
 Do not include hidden reasoning, chain-of-thought, or <think> tags.
-Return only the final user-facing answer. Unless the user requested one
-specific language, answer in Korean first and add a concise English Brief.
+Return only the final user-facing answer.{english_brief_rule}
 
 [Original user request]
 {original_user_text}

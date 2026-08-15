@@ -349,6 +349,70 @@ def render_status(message: str) -> None:
     console.print(f"[{STATUS_STYLE}][{ts}] {message}[/{STATUS_STYLE}]")
 
 
+# ── Live status line ─────────────────────────────────────────────────────────
+
+_SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+
+def _format_elapsed(seconds: float) -> str:
+    total = int(seconds)
+    if total < 60:
+        return f"{total}s"
+    return f"{total // 60}m {total % 60:02d}s"
+
+
+class StatusLine:
+    """Bottom-anchored status line for long-running work.
+
+    Pins a spinner, the current step, and elapsed time to the last terminal row
+    while normal ``console.print`` output scrolls above it.  Outside a terminal
+    it degrades to the plain timestamped lines produced by ``render_status``, so
+    piped output and tests keep their existing behaviour.
+    """
+
+    def __init__(self, *, enabled: bool = True) -> None:
+        self.enabled = bool(enabled and console.is_terminal)
+        self._live: "Live | None" = None
+        self._message = ""
+        self._started = time.monotonic()
+
+    def __rich_console__(self, _console: Any, _options: Any) -> Iterator[Any]:
+        # Re-evaluated on every Live refresh, so the clock keeps ticking even
+        # while a single model call blocks for minutes without an update.
+        yield self._as_text()
+
+    def _as_text(self) -> Text:
+        elapsed = time.monotonic() - self._started
+        frame = _SPINNER_FRAMES[int(elapsed * 10) % len(_SPINNER_FRAMES)]
+        text = Text(no_wrap=True, overflow="ellipsis")
+        text.append(f"{frame} ", style="cyan")
+        text.append(self._message or "준비 중...", style=STATUS_STYLE)
+        text.append(f"  ({_format_elapsed(elapsed)})", style="dim")
+        # Keep the live region exactly one row: a wrapped status line makes the
+        # display jitter on every refresh.
+        text.truncate(max(20, console.width - 1), overflow="ellipsis")
+        return text
+
+    def __enter__(self) -> "StatusLine":
+        self._started = time.monotonic()
+        if self.enabled:
+            self._live = Live(self, console=console, refresh_per_second=10, transient=True)
+            self._live.__enter__()
+        return self
+
+    def __exit__(self, *exc_info: Any) -> bool:
+        live, self._live = self._live, None
+        if live is not None:
+            live.__exit__(*exc_info)
+        return False
+
+    def update(self, message: str) -> None:
+        """Set the current step.  Safe to pass as a ``status`` callback."""
+        self._message = " ".join(str(message).split())
+        if self._live is None and self._message:
+            render_status(self._message)
+
+
 # ── Think-tag helpers ────────────────────────────────────────────────────────
 
 _THINK_OPEN_RE  = re.compile(r"<(?:think|thought|thinking)>",  re.I)

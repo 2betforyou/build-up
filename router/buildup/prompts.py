@@ -37,7 +37,6 @@ COMMON_INSTRUCTIONS = """
 - 모델은 조언만: 실제 실행, 파일 삭제, 앱 조작, 셸 명령 실행, 외부 업로드, 일정 변경은 시스템이 명시적으로 호출할 때만 가능하다고 간주한다.
 
 행동 원칙:
-- 기본적으로 한국어와 영어를 함께 제공한다. 한국어를 먼저 쓰고, 마지막에 짧은 English section을 붙인다.
 - 모르면 모른다고 말하고, 불확실하면 추정 또는 불확실성이라고 분명히 표시한다.
 - 실제로 수행하지 않은 작업을 수행한 것처럼 말하지 않는다.
 - 내부 사고과정, 숨은 추론, `<think>` 블록을 최종 답변에 절대 포함하지 않는다. 사용자에게는 최종 결론과 필요한 근거만 말한다.
@@ -63,7 +62,6 @@ FAST_INSTRUCTIONS = """
 - 실무적으로 바로 쓸 수 있는 답을 우선한다.
 - 불필요한 배경 설명은 줄인다.
 - 다만 중요한 제약, 예외, 주의사항은 생략하지 않는다.
-- 한국어 답변 뒤에 1-3문장짜리 English summary를 붙인다.
 
 우선순위:
 1. 질문 의도를 빠르게 파악한다.
@@ -80,7 +78,6 @@ MAIN_INSTRUCTIONS = """
 - 사용자의 로컬 CLI 맥락, workspace, jobs, calendar, knowledge base를 고려한다.
 - 실행 가능한 것과 불가능한 것을 분리해서 설명한다.
 - 단순 답변보다 근거 있는 판단과 설계 대안을 제공한다.
-- 한국어로 충분히 설명한 뒤, English section에서는 핵심 판단과 다음 액션만 압축한다.
 
 기본 답변 구조:
 1) 핵심 결론
@@ -117,7 +114,6 @@ BUILDUP_INSTRUCTIONS = """
 - active paper가 있으면 "이 논문", "abstract", "요약해줘", "번역해줘" 같은 후속 요청은 기본적으로 active paper에 묶는다.
 - 파일/섹션 접근 결과를 받으면 그 결과만 근거로 최종 답변한다.
 - reviewer mode는 최종 비판 리뷰에만 쓰고, 일반 독해와 번역은 research model 기준으로 처리한다.
-- 한국어 본문 뒤에 짧은 English Brief를 덧붙인다.
 """.strip()
 
 
@@ -170,8 +166,7 @@ SEARCH_SYNTHESIS_PROMPT = """당신은 웹 검색 결과를 종합 분석하는 
 3. **출처 명시**: 주장에는 반드시 [번호] 형식으로 출처를 표시하라.
 4. **비판적 분석**: 출처 간 의견 차이, 한계점, 미해결 문제도 언급하라.
 5. **실용적 시사점**: "그래서 뭘 해야 하는가"를 반드시 포함하라.
-6. **한국어와 영어 출처 모두** 동등하게 활용하라. 영어 출처의 내용도 한국어로 번역하여 통합하라.
-7. **이중 언어 응답**: 한국어 분석을 먼저 쓰고, 마지막에 핵심만 담은 English Brief를 추가하라.
+6. **한국어와 영어 출처 모두** 동등하게 활용하라. 영어 출처의 내용도 한국어로 번역하여 통합하라.{bilingual_rule}
 
 ## 답변 구조
 1) **개요** (2-3문장): 주제의 현재 상황 요약
@@ -215,6 +210,35 @@ DEEP_SEARCH_FILE_PROMPT = """아래 분석 내용을 깔끔한 Markdown 문서�
 
 _USER_PREFS: str = ""
 _RUNTIME_STEERING: str = ""
+# Korean-only output by default; the English companion section is opt-in via
+# BUILDUP_ENGLISH_BRIEF or the /english shell command.
+_ENGLISH_BRIEF: bool = False
+
+
+def set_english_brief(enabled: bool) -> None:
+    """Enable or disable the English companion section in all system prompts."""
+    global _ENGLISH_BRIEF
+    _ENGLISH_BRIEF = bool(enabled)
+
+
+def english_brief_enabled() -> bool:
+    return _ENGLISH_BRIEF
+
+
+def bilingual_clause() -> str:
+    """One-line bilingual directive for prompts built outside this module."""
+    if not _ENGLISH_BRIEF:
+        return ""
+    return (
+        " 사용자가 특정 언어만 요청하지 않았다면 한국어 답변 뒤에 "
+        "짧은 English Brief를 붙여라."
+    )
+
+
+def _bilingual_block() -> str:
+    if not _ENGLISH_BRIEF:
+        return ""
+    return f"{BILINGUAL_OUTPUT_RULES}\n\n"
 
 
 def set_user_prefs(prefs: str) -> None:
@@ -252,9 +276,7 @@ def _steering_block() -> str:
 def system_fast() -> str:
     return f"""{date_context()}
 
-{BILINGUAL_OUTPUT_RULES}
-
-{COMMON_INSTRUCTIONS}
+{_bilingual_block()}{COMMON_INSTRUCTIONS}
 
 {FAST_INSTRUCTIONS}{_prefs_block()}{_steering_block()}
 """
@@ -263,9 +285,7 @@ def system_fast() -> str:
 def system_main() -> str:
     return f"""{date_context()}
 
-{BILINGUAL_OUTPUT_RULES}
-
-{COMMON_INSTRUCTIONS}
+{_bilingual_block()}{COMMON_INSTRUCTIONS}
 
 {MAIN_INSTRUCTIONS}
 
@@ -276,9 +296,7 @@ def system_main() -> str:
 def system_research() -> str:
     return f"""{date_context()}
 
-{BILINGUAL_OUTPUT_RULES}
-
-{COMMON_INSTRUCTIONS}
+{_bilingual_block()}{COMMON_INSTRUCTIONS}
 
 {BUILDUP_INSTRUCTIONS}
 
@@ -288,10 +306,17 @@ def system_research() -> str:
 
 def system_search_synthesis(query: str, search_results: str) -> str:
     """Build the search synthesis prompt."""
+    bilingual_rule = (
+        "\n7. **이중 언어 응답**: 한국어 분석을 먼저 쓰고, "
+        "마지막에 핵심만 담은 English Brief를 추가하라."
+        if _ENGLISH_BRIEF
+        else ""
+    )
     return SEARCH_SYNTHESIS_PROMPT.format(
         date_context=date_context(),
         query=query,
         search_results=search_results,
+        bilingual_rule=bilingual_rule,
     )
 
 

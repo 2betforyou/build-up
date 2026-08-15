@@ -242,6 +242,7 @@ Source ID는 canonical URL, Evidence ID는 source ID와 exact passage, Claim ID�
 | `BUILDUP_BASE_DIR` | `~/.buildup` | local data root |
 | `BUILDUP_RESEARCH_MODEL` | `qwen3.8:27b` | plan, evidence, assessment, writer |
 | `BUILDUP_REVIEWER_MODEL` | `deepseek-r1:32b` | independent claim audit |
+| `BUILDUP_ENGLISH_BRIEF` | `false` | 한국어 답변 뒤 English Brief 섹션 추가 |
 | `BUILDUP_FAST_MODEL` | `gemma4:e4b` | quick chat |
 | `BUILDUP_MAIN_MODEL` | `qwen3.8:27b` | general reasoning |
 | `BUILDUP_CODER_MODEL` | `qwen3.8:27b` | code tasks |

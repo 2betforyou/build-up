@@ -128,6 +128,9 @@ from buildup.prompts import (
     system_main,
     system_search_synthesis,
     deep_search_file_prompt,
+    bilingual_clause,
+    english_brief_enabled,
+    set_english_brief,
     set_runtime_steering,
     set_user_prefs,
 )
@@ -145,6 +148,7 @@ from buildup.rendering import (
     render_previous_conversation,
     read_prompt,
     render_status,
+    StatusLine,
     render_streaming_answer,
 )
 from buildup.search import format_search_results, web_search
@@ -215,8 +219,6 @@ Operational rules:
 - Be skeptical in a useful way: check method, assumptions, baselines, metrics,
   ablations, limitations, and reproducibility signals before praising a paper.
 - Do not invent paper content. If the paper does not state something, say so.
-- Prefer Korean first, then a compact English Brief unless the user requests a
-  single language.
 - A strong answer usually starts with a one-line verdict, then covers the core
   problem, contribution, method reconstruction, evidence quality, important
   numbers, limitations, and what a senior researcher would verify next.
@@ -235,8 +237,6 @@ Operational rules:
   external actions.
 - For paper/PDF requests, still use paper tools when clearly requested, but do
   not over-expand ordinary tasks into deep research reviews.
-- Prefer Korean first, then a compact English Brief unless the user requests a
-  single language.
 - When the user asks for an action, distinguish what build-up actually did from
   what it can recommend next.
 """
@@ -470,6 +470,7 @@ class InteractiveShell:
             "/frame": self._cmd_intent_debug,
             "/steer": self._cmd_steer,
             "/steering": self._cmd_steer,
+            "/english": self._cmd_english,
             "/skills": self._cmd_skills,
             "/paper": self._cmd_paper,
             "/papers": self._cmd_paper,
@@ -667,8 +668,14 @@ class InteractiveShell:
             info = load_study(self.active_study_id, self._session_job_id, self.cfg)
             if info:
                 active_study = study_context(info, self.cfg)
+        english_brief_rule = (
+            "\n- Prefer Korean first, then a compact English Brief unless the"
+            " user requests a single language."
+            if english_brief_enabled()
+            else ""
+        )
         if self.assistant_mode == "research":
-            context = RESEARCH_PAPER_READER_CONTEXT
+            context = RESEARCH_PAPER_READER_CONTEXT + english_brief_rule
             # The shelf is a browsing UI, not global prompt memory. Only an
             # explicitly selected paper may enter this session's context.
             if self.active_paper_id:
@@ -687,7 +694,9 @@ class InteractiveShell:
             steering = self._steering_context() if include_steering else ""
             return context + ("\n\n" + steering if steering else "")
         steering = self._steering_context() if include_steering else ""
-        context = DAYTIME_ASSISTANT_CONTEXT + ("\n\n" + durable_memory if durable_memory else "")
+        context = DAYTIME_ASSISTANT_CONTEXT + english_brief_rule + (
+            "\n\n" + durable_memory if durable_memory else ""
+        )
         if active_study:
             context += "\n\n" + active_study
         return context + ("\n\n" + steering if steering else "")
@@ -915,6 +924,8 @@ class InteractiveShell:
             )
         self._classifier.init()
         self._exemplars.build()
+
+        set_english_brief(self.cfg.english_brief)
 
         # ── Load user preferences (~/.buildup_prefs.md) ───────────────────
         prefs = load_user_prefs(self.cfg)
@@ -1453,6 +1464,27 @@ class InteractiveShell:
         import json
         render_info("Intent Debug", json.dumps(debug, ensure_ascii=False, indent=2), "cyan")
 
+    def _cmd_english(self, user_input: str) -> None:
+        """Toggle the English Brief companion section for this session."""
+        parts = user_input.split(maxsplit=1)
+        arg = parts[1].strip().lower() if len(parts) > 1 else ""
+        if arg in {"on", "켜기", "true", "1"}:
+            set_english_brief(True)
+        elif arg in {"off", "끄기", "false", "0"}:
+            set_english_brief(False)
+        elif arg in {"", "show", "status"}:
+            pass
+        else:
+            render_info("English Brief", "사용법: /english [on|off]", "red")
+            return
+        state = "on" if english_brief_enabled() else "off"
+        render_info(
+            "English Brief",
+            f"현재 상태: {state}\n"
+            "이 세션에만 적용됩니다. 영구 설정은 BUILDUP_ENGLISH_BRIEF=true 를 쓰세요.",
+            "cyan",
+        )
+
     def _cmd_steer(self, user_input: str) -> None:
         """Set session-scoped steering directives."""
         parts = user_input.split(maxsplit=2)
@@ -1637,7 +1669,7 @@ class InteractiveShell:
 
         lines.append("")
         lines.append("[dim]예시 ~/.buildup_prefs.md:[/dim]")
-        lines.append("[dim]  - 답변은 한국어 먼저, 마지막에 짧은 English Brief[/dim]")
+        lines.append("[dim]  - 결론을 먼저 쓰고 근거를 뒤에 붙이기[/dim]")
         lines.append("[dim]  - 코드 설명은 간결하게[/dim]")
         lines.append("[dim]  - 파일명은 kebab-case 사용[/dim]")
 
@@ -1803,7 +1835,7 @@ class InteractiveShell:
             render_status("Summarizing job actions...")
             gen = chat_stream(
                 self.session, self.cfg, self.cfg.fast_model,
-                [{"role": "system", "content": "작업 이력을 간결하게 요약하라. 한국어 먼저, 마지막에 짧은 English Brief를 붙여라."},
+                [{"role": "system", "content": f"작업 이력을 간결하게 요약하라.{bilingual_clause()}"},
                  {"role": "user", "content": f"다음 작업 이력을 요약해줘:\n\n{log_text}"}],
                 keep_alive="2m", logger=self.logger, think=True,
             )
@@ -2183,18 +2215,19 @@ class InteractiveShell:
         request_label = f"resume {resume_selector}" if resume_selector else query
         self.history.add("user", f"[deep research] {request_label}", kind="research")
         try:
-            result = run_deep_research(
-                query,
-                self.cfg,
-                self.session,
-                self.logger,
-                job_id=jid,
-                status=render_status,
-                session_id=self._session_id,
-                workspace_key=self._workspace_key,
-                resume=resume_selector,
-                ingest_knowledge=ingest_knowledge,
-            )
+            with StatusLine() as status_line:
+                result = run_deep_research(
+                    query,
+                    self.cfg,
+                    self.session,
+                    self.logger,
+                    job_id=jid,
+                    status=status_line.update,
+                    session_id=self._session_id,
+                    workspace_key=self._workspace_key,
+                    resume=resume_selector,
+                    ingest_knowledge=ingest_knowledge,
+                )
         except Exception as exc:
             self.history.add(
                 "assistant",
@@ -2365,13 +2398,14 @@ class InteractiveShell:
             current_job=self.current_job,
             active_paper_id=self.active_paper_id,
         )
-        result = translate_paper_pdf(
-            target,
-            self.cfg,
-            self.session,
-            self.logger,
-            status=render_status,
-        )
+        with StatusLine() as status_line:
+            result = translate_paper_pdf(
+                target,
+                self.cfg,
+                self.session,
+                self.logger,
+                status=status_line.update,
+            )
         render_info(
             "Paper Translation",
             f"저장 완료: {result.output_path}\n"

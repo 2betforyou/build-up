@@ -302,8 +302,7 @@ PAPER_SUMMARY_SYSTEM = """\
 3. 논문에 없는 내용을 추가하지 마라.
 4. 불확실하거나 명시되지 않은 항목은 "논문에서 명시하지 않음"으로 표시하라.
 5. 저자의 주장(claim)과 실험으로 입증된 사실을 구분하라.
-6. 한국어를 기본 본문으로 쓰고, 마지막에 짧은 English Brief를 추가하라.
-7. technical terms, model names, datasets, metrics, equations는 원문 표기를 보존하라.
+6. technical terms, model names, datasets, metrics, equations는 원문 표기를 보존하라.
 """
 
 PAPER_SUMMARY_PROMPT = """\
@@ -343,10 +342,7 @@ PAPER_SUMMARY_PROMPT = """\
 
 ## 이 논문을 이해하기 위한 배경 지식
 (논문에서 전제하는 선행 개념 목록. 일반 지식이므로 [배경 지식] 표시)
-
-## English Brief
-(3-6 bullets. Main verdict, contribution, evidence quality, and caveats only.)
-
+{english_brief_section}
 ---
 논문 본문:
 {paper_text}
@@ -364,7 +360,6 @@ PAPER_QA_SYSTEM = """\
 5. 일반 배경 지식이 필요할 때는 반드시 [배경 지식]으로 구분하라.
 6. 저자의 주장과 실험으로 검증된 사실을 구분하라.
 7. 논문 외부 지식으로 답을 채우거나 가정하지 마라.
-8. 한국어 답변 뒤에 짧은 English Brief를 붙인다.
 """
 
 PAPER_QA_PROMPT = """\
@@ -378,7 +373,6 @@ PAPER_QA_PROMPT = """\
 질문: {question}
 
 위 논문 본문을 근거로 답하라. 본문에 없는 내용은 지어내지 마라.
-한국어로 먼저 답하고, 마지막에 2-4문장의 English Brief를 덧붙여라.
 """
 
 EXPLAIN_SYSTEM = """\
@@ -390,7 +384,6 @@ EXPLAIN_SYSTEM = """\
 3. 논문이 이 개념을 어떻게 활용/변형했는지 설명하라. [논문에서의 적용]
 4. 이해를 위한 직관적 비유를 제공하라 (있을 때). [직관]
 5. 논문에 없는 내용을 추가할 때는 [배경 지식]으로 명확히 표시하라.
-6. 한국어 설명 뒤에 짧은 English Brief를 붙여라.
 """
 
 EXPLAIN_PROMPT = """\
@@ -414,8 +407,21 @@ COMPARE_SYSTEM = """\
 2. 수치 비교는 반드시 동일 벤치마크/설정에서의 수치만 비교하라.
 3. 직접 비교가 불가능한 경우 "직접 비교 불가 (다른 설정)"이라고 명시하라.
 4. 논문 간 우열을 판단할 때 해당 주장의 근거가 있는지 확인하라.
-5. 한국어 비교 뒤에 concise English Brief를 붙여라.
 """
+
+
+def _english_brief_section(*lines: str) -> str:
+    """Optional English Brief heading for paper output templates.
+
+    Returns a leading newline with the section so callers can interpolate it
+    directly after the preceding heading — f-strings cannot hold a backslash
+    escape on the Python 3.10 baseline.
+    """
+    from buildup.prompts import english_brief_enabled
+
+    if not english_brief_enabled():
+        return ""
+    return "\n" + "\n".join(lines)
 
 
 def _research_model(cfg) -> str:
@@ -443,7 +449,6 @@ SENIOR_REVIEW_SYSTEM = """\
 3. 실험 설계, baseline, metric, ablation, limitation을 비판적으로 확인한다.
 4. 근거가 약하면 "근거 약함"이라고 표시한다.
 5. 한국어로 본문을 작성하되 모델명, 데이터셋명, 수치는 원문 표기를 유지한다.
-6. 마지막에 concise English Brief를 추가한다.
 """
 
 # ─────────────────────────────────────────────
@@ -554,7 +559,13 @@ def summarize_paper(paper: Paper, cfg, session, logger) -> str:
     else:
         paper_text = paper.full_text
 
-    prompt = PAPER_SUMMARY_PROMPT.format(paper_text=paper_text)
+    prompt = PAPER_SUMMARY_PROMPT.format(
+        paper_text=paper_text,
+        english_brief_section=_english_brief_section(
+            "## English Brief",
+            "(3-6 bullets. Main verdict, contribution, evidence quality, and caveats only.)",
+        ),
+    )
 
     summary = chat(
         session, cfg, _research_model(cfg),
@@ -862,8 +873,7 @@ def generate_senior_review(
 ## 7. 한계: 명시된 한계와 추론된 약점
 ## 8. 내가 시니어 연구자라면 다음에 확인할 것
 ## 9. 구현/재현 체크리스트
-## 10. 읽을 가치 판단
-## 11. English Brief
+## 10. 읽을 가치 판단{_english_brief_section("## 11. English Brief")}
 """
     return chat(
         session, cfg, _reviewer_model(cfg) if reviewer_mode else _research_model(cfg),
