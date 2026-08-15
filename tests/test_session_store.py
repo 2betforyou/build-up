@@ -5,9 +5,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from friday.config import FridayConfig
-from friday.conversation import ConversationHistory
-from friday.session_store import (
+from buildup.config import BuildupConfig
+from buildup.conversation import ConversationHistory
+from buildup.session_store import (
     archive_session,
     export_session,
     list_sessions,
@@ -23,7 +23,7 @@ from friday.session_store import (
 class SessionStoreTests(unittest.TestCase):
     def test_session_lease_prevents_two_writers(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            cfg = FridayConfig(base_dir=Path(temp_dir))
+            cfg = BuildupConfig(base_dir=Path(temp_dir))
             first = SessionLease(cfg, "shared")
             second = SessionLease(cfg, "shared")
             self.assertTrue(first.acquire())
@@ -46,7 +46,7 @@ class SessionStoreTests(unittest.TestCase):
 
     def test_sessions_are_workspace_scoped_searchable_and_archivable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            cfg = FridayConfig(base_dir=Path(temp_dir))
+            cfg = BuildupConfig(base_dir=Path(temp_dir))
             save_session(
                 "alpha-session",
                 [
@@ -99,7 +99,7 @@ class SessionStoreTests(unittest.TestCase):
                 }),
                 encoding="utf-8",
             )
-            cfg = FridayConfig(base_dir=root)
+            cfg = BuildupConfig(base_dir=root)
 
             info = load_session("legacy", cfg)
             self.assertIsNotNone(info)

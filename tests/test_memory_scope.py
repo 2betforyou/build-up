@@ -4,14 +4,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from friday.config import FridayConfig
-from friday.conversation_memory import append_conversation_memory, load_conversation_memory
+from buildup.config import BuildupConfig
+from buildup.conversation_memory import append_conversation_memory, load_conversation_memory
 
 
 class MemoryScopeTests(unittest.TestCase):
     def test_user_memory_is_shared_but_workspace_memory_does_not_leak(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            cfg = FridayConfig(base_dir=Path(temp_dir))
+            cfg = BuildupConfig(base_dir=Path(temp_dir))
             append_conversation_memory(
                 cfg, "A에서 항상 A 규칙을 기억해", "A 전용 설정으로 반영했어",
                 workspace_key="job:a", scope="workspace", manual=True,
