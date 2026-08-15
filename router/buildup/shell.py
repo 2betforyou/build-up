@@ -67,6 +67,7 @@ from buildup.agent import run_agent
 from buildup.git_mgr import RequiresConfirmation, git_run
 from buildup.jobs import (
     append_action_log,
+    bind_job_path,
     cmd_edit,
     cmd_files,
     cmd_import,
@@ -76,10 +77,12 @@ from buildup.jobs import (
     cmd_job_use,
     cmd_read,
     cmd_write,
+    format_job_binds,
     format_job_label,
     job_display_name,
     list_templates,
     read_action_log,
+    unbind_job_path,
 )
 from buildup.embed_classifier import IntentEmbedClassifier
 from buildup.exemplar import ExemplarIndex
@@ -1777,6 +1780,38 @@ class InteractiveShell:
                 msg += f"\n\nTemplate applied ({template}):\n  " + "\n  ".join(created)
             render_info("Job", msg)
 
+        elif sub == "bind":
+            rest = [token for token in parts[2:] if token != "--write"]
+            if not rest:
+                raise ValueError("Usage: /job bind PATH [--write]")
+            writable = "--write" in parts[2:]
+            jid = get_current_job(self.cfg, required=True)
+            bind = bind_job_path(jid, " ".join(rest), self.cfg, writable=writable)
+            render_info(
+                "Job Bind",
+                f"{'쓰기 허용' if bind.writable else '읽기 전용'}: {bind.path}\n"
+                + (
+                    "이 디렉터리의 파일을 읽고 쓸 수 있습니다."
+                    if bind.writable
+                    else "읽기만 가능합니다. 쓰기도 열려면 --write 를 붙이세요."
+                ),
+                "yellow" if bind.writable else "green",
+            )
+
+        elif sub == "unbind":
+            if len(parts) < 3:
+                raise ValueError("Usage: /job unbind PATH")
+            jid = get_current_job(self.cfg, required=True)
+            removed = unbind_job_path(jid, " ".join(parts[2:]), self.cfg)
+            render_info(
+                "Job Bind",
+                f"해제됨: {parts[2]}" if removed else f"bind되어 있지 않습니다: {parts[2]}",
+                "green" if removed else "yellow",
+            )
+
+        elif sub == "binds":
+            render_info("Job Binds", format_job_binds(get_current_job(self.cfg, required=True), self.cfg), "cyan")
+
         elif sub == "use":
             if len(parts) < 3:
                 raise ValueError("Usage: /job use JOB_ID")
@@ -2058,6 +2093,16 @@ class InteractiveShell:
         )
         result = render_streaming_answer(gen, f"Search ({engine}) + {self.cfg.main_model}", "main")
         render_status(f"Synthesis completed in {perf_counter() - synth_started:.1f}s")
+        # A synthesis panel looks like a research report but carries none of the
+        # guarantees, so say plainly which one the user is looking at.
+        render_info(
+            "Search Summary",
+            f"{len(results)} web results summarized by {self.cfg.main_model} "
+            f"via {engine}.\n"
+            "No evidence ledger, no exact-passage check, no citation audit.\n"
+            f"For verified claims with sources: /research {query}",
+            "yellow",
+        )
         self.history.add("user", f"[web search] {query}")
         self.history.add("assistant", result)
 

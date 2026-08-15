@@ -20,6 +20,7 @@ from buildup.config import load_config
 from buildup.http_client import build_session
 from buildup.jobs import (
     append_action_log,
+    bind_job_path,
     cmd_files,
     cmd_import,
     cmd_job_list,
@@ -27,9 +28,11 @@ from buildup.jobs import (
     cmd_job_rename,
     cmd_job_use,
     cmd_read,
+    format_job_binds,
     format_job_label,
     job_display_name,
     read_action_log,
+    unbind_job_path,
 )
 from buildup.logging_setup import setup_logging
 from buildup.ollama import (
@@ -170,6 +173,14 @@ def main() -> None:
     job_use.add_argument("job_id")
     job_rename = job_sub.add_parser("rename")
     job_rename.add_argument("name", nargs="+")
+    job_bind = job_sub.add_parser("bind", help="bind a real directory to the current job")
+    job_bind.add_argument("path")
+    job_bind.add_argument(
+        "--write", action="store_true", help="allow writes into the bound directory",
+    )
+    job_unbind = job_sub.add_parser("unbind")
+    job_unbind.add_argument("path")
+    job_sub.add_parser("binds")
     job_sub.add_parser("current")
     job_sub.add_parser("list")
     job_sub.add_parser("log")
@@ -454,10 +465,38 @@ def main() -> None:
                 jid = get_current_job(cfg, required=True)
                 display_name = cmd_job_rename(jid, " ".join(args.name), cfg)
                 render_info("Job", f"name: {display_name}\nid: {jid}")
+            elif args.job_command == "bind":
+                jid = get_current_job(cfg, required=True)
+                bind = bind_job_path(jid, args.path, cfg, writable=args.write)
+                render_info(
+                    "Job Bind",
+                    f"{'쓰기 허용' if bind.writable else '읽기 전용'}: {bind.path}\n"
+                    + (
+                        "이 디렉터리의 파일을 읽고 쓸 수 있습니다."
+                        if bind.writable
+                        else "읽기만 가능합니다. 쓰기도 열려면 --write 를 붙여 다시 bind하세요."
+                    ),
+                    "green" if not bind.writable else "yellow",
+                )
+            elif args.job_command == "unbind":
+                jid = get_current_job(cfg, required=True)
+                removed = unbind_job_path(jid, args.path, cfg)
+                render_info(
+                    "Job Bind",
+                    f"해제됨: {args.path}" if removed else f"bind되어 있지 않습니다: {args.path}",
+                    "green" if removed else "yellow",
+                )
+            elif args.job_command == "binds":
+                jid = get_current_job(cfg, required=True)
+                render_info("Job Binds", format_job_binds(jid, cfg), "cyan")
             elif args.job_command == "current":
                 current = get_current_job(cfg, required=False)
                 if current:
-                    render_info("Job", f"current: {job_display_name(current, cfg)}\nid: {current}")
+                    render_info(
+                        "Job",
+                        f"current: {job_display_name(current, cfg)}\nid: {current}\n"
+                        f"binds:\n{format_job_binds(current, cfg)}",
+                    )
                 else:
                     render_info("Job", "current: -")
             elif args.job_command == "list":

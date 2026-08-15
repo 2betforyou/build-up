@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import shutil
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -36,18 +37,35 @@ def _normalize_job_display_name(name: str) -> str:
     return display_name
 
 
-def _write_job_display_name(base: Path, display_name: str) -> None:
+def _read_job_metadata(base: Path) -> Dict[str, Any]:
+    metadata_path = base / _JOB_METADATA_FILE
+    if not metadata_path.is_file() or metadata_path.is_symlink():
+        return {}
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return {}
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def _write_job_metadata(base: Path, updates: Dict[str, Any]) -> None:
+    """Merge *updates* into the job metadata file atomically."""
     metadata_path = base / _JOB_METADATA_FILE
     if metadata_path.is_symlink():
         raise ValueError(f"job metadata가 symlink입니다: {metadata_path}")
     temporary_path = base / f"{_JOB_METADATA_FILE}.tmp"
     if temporary_path.is_symlink():
         raise ValueError(f"job metadata 임시 파일이 symlink입니다: {temporary_path}")
+    metadata = _read_job_metadata(base)
+    metadata.update(updates)
     temporary_path.write_text(
-        json.dumps({"display_name": display_name}, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
+        json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8",
     )
     temporary_path.replace(metadata_path)
+
+
+def _write_job_display_name(base: Path, display_name: str) -> None:
+    _write_job_metadata(base, {"display_name": display_name})
 
 
 def job_display_name(job_id: str, cfg: BuildupConfig) -> str:
@@ -62,6 +80,110 @@ def job_display_name(job_id: str, cfg: BuildupConfig) -> str:
         except (OSError, ValueError, json.JSONDecodeError):
             pass
     return re.sub(r"^\d{8}-\d{6}-", "", job_id)
+
+
+# ============================================================
+# Bound directories
+# ============================================================
+#
+# A job normally reaches only workspace/{job_id}/.  A bind widens that reach to
+# one real directory the user names explicitly, so paper folders, manuscripts,
+# and source trees can be worked on in place instead of being copied in.
+#
+# Binds are read-only unless the user passes --write, and the guards below keep
+# a bind from ever covering Build-up's own data root.
+
+
+@dataclass(frozen=True)
+class JobBind:
+    path: Path
+    writable: bool
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {"path": str(self.path), "writable": self.writable}
+
+
+def _validate_bind_target(raw_path: str, cfg: BuildupConfig) -> Path:
+    candidate = resolve_path(raw_path)
+    if candidate.is_symlink():
+        raise ValueError(f"심볼릭 링크는 bind할 수 없습니다: {candidate}")
+    if not candidate.is_dir():
+        raise ValueError(f"디렉터리가 아닙니다: {candidate}")
+    if candidate == candidate.parent:
+        raise ValueError("파일시스템 루트는 bind할 수 없습니다.")
+    if candidate == Path.home().resolve():
+        raise ValueError("홈 디렉터리 전체는 bind할 수 없습니다. 더 좁은 경로를 지정하세요.")
+
+    base_dir = cfg.base_dir.expanduser().resolve()
+    # Binding an ancestor of the data root would expose state.json, the session
+    # database, and credentials cached under it.
+    if candidate == base_dir or candidate in base_dir.parents:
+        raise ValueError(
+            f"Build-up 데이터 루트를 포함하는 경로는 bind할 수 없습니다: {candidate}"
+        )
+    return candidate
+
+
+def job_binds(job_id: str, cfg: BuildupConfig) -> List[JobBind]:
+    """Return the directories bound to *job_id*, dropping stale entries."""
+    job_id = validate_job_id(job_id)
+    entries = _read_job_metadata(cfg.workspace_dir / job_id).get("binds", [])
+    binds: List[JobBind] = []
+    if not isinstance(entries, list):
+        return binds
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        raw = entry.get("path")
+        if not isinstance(raw, str):
+            continue
+        path = Path(raw).expanduser()
+        if not path.is_dir() or path.is_symlink():
+            continue
+        binds.append(JobBind(path=path.resolve(), writable=bool(entry.get("writable"))))
+    return binds
+
+
+def bind_job_path(
+    job_id: str, raw_path: str, cfg: BuildupConfig, *, writable: bool = False,
+) -> JobBind:
+    """Bind one real directory to *job_id*.  Re-binding updates the write flag."""
+    job_id = validate_job_id(job_id)
+    target = _validate_bind_target(raw_path, cfg)
+    base = cfg.workspace_dir / job_id
+    if not base.is_dir():
+        raise ValueError(f"job 폴더가 없습니다: {base}")
+    kept = [bind for bind in job_binds(job_id, cfg) if bind.path != target]
+    bind = JobBind(path=target, writable=writable)
+    _write_job_metadata(base, {"binds": [item.as_dict() for item in kept + [bind]]})
+    append_action_log(
+        job_id, cfg, "job bind", f"{target} ({'rw' if writable else 'ro'})",
+    )
+    return bind
+
+
+def unbind_job_path(job_id: str, raw_path: str, cfg: BuildupConfig) -> bool:
+    """Remove a bind.  Returns False when the path was not bound."""
+    job_id = validate_job_id(job_id)
+    target = resolve_path(raw_path)
+    existing = job_binds(job_id, cfg)
+    kept = [bind for bind in existing if bind.path != target]
+    if len(kept) == len(existing):
+        return False
+    _write_job_metadata(
+        cfg.workspace_dir / job_id, {"binds": [item.as_dict() for item in kept]},
+    )
+    append_action_log(job_id, cfg, "job unbind", str(target))
+    return True
+
+
+def format_job_binds(job_id: str, cfg: BuildupConfig) -> str:
+    binds = job_binds(job_id, cfg)
+    if not binds:
+        return "(bind된 디렉터리 없음)"
+    return "\n".join(
+        f"{'rw' if bind.writable else 'ro'}  {bind.path}" for bind in binds
+    )
 
 
 def format_job_label(job_id: str, cfg: BuildupConfig) -> str:
@@ -284,10 +406,63 @@ def cmd_import(src_path: str, job_id: Optional[str], cfg: BuildupConfig) -> Tupl
     return dst, job_id
 
 
+def resolve_job_file(
+    job_id: str, relpath: str, cfg: BuildupConfig, *, for_write: bool = False,
+) -> Path:
+    """Resolve *relpath* against the job workspace, then any bound directory.
+
+    Absolute paths are accepted only when they land inside an allowed root, so a
+    bind widens reach without reopening the whole filesystem.  A path that does
+    not exist anywhere resolves into the workspace, keeping new files local.
+    """
+    from buildup.sandbox import job_read_roots, job_write_roots
+
+    if not relpath:
+        raise ValueError("파일 경로(relpath)가 지정되지 않았습니다.")
+    roots = job_write_roots(job_id, cfg) if for_write else job_read_roots(job_id, cfg)
+
+    candidate = Path(relpath).expanduser()
+    if candidate.is_absolute():
+        for root in roots:
+            try:
+                return ensure_within(candidate, root)
+            except ValueError:
+                continue
+        if for_write:
+            # Distinguish "never bound" from "bound but read-only", because the
+            # second case looks like a bug to someone who just bound the path.
+            for bind in job_binds(job_id, cfg):
+                try:
+                    ensure_within(candidate, bind.path)
+                except ValueError:
+                    continue
+                raise ValueError(
+                    f"읽기 전용으로 bind된 경로입니다: {bind.path}\n"
+                    f"  쓰기도 열려면: buildup job bind {bind.path} --write"
+                )
+        allowed = "\n".join(f"    {root}" for root in roots)
+        raise ValueError(f"허용된 경로 밖입니다: {candidate}\n  허용 범위:\n{allowed}")
+
+    for root in roots:
+        try:
+            path = ensure_within(root / relpath, root)
+        except ValueError:
+            continue
+        if path.exists():
+            return path
+    return ensure_within(roots[0] / relpath, roots[0])
+
+
 def cmd_files(job_id: str, cfg: BuildupConfig) -> List[str]:
-    """List files in a job directory."""
+    """List files in the job workspace and every bound directory."""
     from buildup.paths import list_files
-    return list_files(job_dir(job_id, cfg))
+    from buildup.sandbox import job_read_roots
+
+    roots = job_read_roots(job_id, cfg)
+    entries = list(list_files(roots[0]))
+    for root in roots[1:]:
+        entries.extend(f"{root}/{name}" for name in list_files(root))
+    return entries
 
 
 def cmd_write(job_id: str, relpath: str, content: str, cfg: BuildupConfig) -> Path:
@@ -300,8 +475,7 @@ def cmd_write(job_id: str, relpath: str, content: str, cfg: BuildupConfig) -> Pa
     if not relpath:
         raise ValueError("파일 경로(relpath)가 지정되지 않았습니다.")
 
-    base = job_dir(job_id, cfg)
-    path = ensure_within(base / relpath, base)
+    path = resolve_job_file(job_id, relpath, cfg, for_write=True)
 
     require_write(path, job_id, cfg, context=f"write {relpath}")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -328,8 +502,7 @@ def cmd_edit(
     if not relpath:
         raise ValueError("파일 경로(relpath)가 지정되지 않았습니다.")
 
-    base = job_dir(job_id, cfg)
-    path = ensure_within(base / relpath, base)
+    path = resolve_job_file(job_id, relpath, cfg, for_write=True)
 
     require_read(path, cfg, context=f"edit {relpath}")
     require_write(path, job_id, cfg, context=f"edit {relpath}")
@@ -365,8 +538,7 @@ def cmd_read(job_id: str, relpath: str, cfg: BuildupConfig) -> str:
     """
     from buildup.sandbox import require_read
 
-    base = job_dir(job_id, cfg)
-    path = ensure_within(base / relpath, base)
+    path = resolve_job_file(job_id, relpath, cfg)
 
     # Validate through sandbox
     require_read(path, cfg, context=f"read {relpath}")

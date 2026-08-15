@@ -20,6 +20,16 @@ All notable changes are documented here. Versions follow Semantic Versioning.
 - Automatic completed-research ingestion, contradiction preservation, source-hash staleness, explicit cross-vault binding, and Study-only user verification promotion.
 - Per-run archival of directly fetched original PDF bytes, with source metadata and final-manifest SHA-256 verification propagated into Knowledge Vault citations.
 
+- Opt-in `job bind` for working on real directories in place, read-only by
+  default, with the data root, `$HOME`, symlinks, and path escapes refused.
+- Bottom-anchored live status line reporting the current research step, budget
+  counters, and elapsed time, so long model calls are distinguishable from a hang.
+- `doctor` checks for stale pre-rename environment variables, a base directory
+  whose jobs live somewhere else, and research/reviewer weights that exceed
+  available memory; failing checks now name the command that fixes them.
+- `BUILDUP_ENGLISH_BRIEF` and `/english` to toggle the English companion
+  section, which is now off by default.
+
 ### Changed
 
 - Product package, command, environment variables, paths, and public documentation now use Build-up naming.

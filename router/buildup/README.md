@@ -85,6 +85,8 @@ Knowledge ingestion may read only a completed research run whose citation audit,
 
 File writes must pass the relevant sandbox gate. Research artifacts live inside the owning job workspace; Knowledge Vault writes live only below `knowledge/`; shared cache and session state live only in explicit Build-up data directories.
 
+A job may also reach one or more directories the user bound to it with `job bind`. Binds are read-only unless created with `--write`, resolve through `jobs.resolve_job_file()`, and widen `sandbox.job_read_roots()` / `sandbox.job_write_roots()`. A bind may never cover the data root or `$HOME`.
+
 ## Verification
 
 ```bash

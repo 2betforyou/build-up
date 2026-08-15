@@ -197,7 +197,13 @@ class ReleaseReadinessTests(unittest.TestCase):
                 and "__pycache__" not in path.parts
                 and path.suffix.lower() in {".py", ".md", ".yaml", ".yml", ".toml", ".txt"}
             )
+        # doctor.py is the one deliberate exception: its migration checks warn
+        # about leftover pre-rename variables and data directories, which it can
+        # only do by naming them.
+        migration_checker = project_root / "router" / "buildup" / "doctor.py"
         for path in public_files:
+            if path == migration_checker:
+                continue
             with self.subTest(path=path.relative_to(project_root)):
                 text = path.read_text(encoding="utf-8")
                 self.assertFalse(

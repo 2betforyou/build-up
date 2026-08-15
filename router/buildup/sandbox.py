@@ -124,6 +124,32 @@ def require_read(
     return resolved
 
 
+def _bind_roots(job_id: str, cfg: BuildupConfig, *, writable_only: bool) -> list[Path]:
+    from buildup.jobs import job_binds
+
+    try:
+        binds = job_binds(job_id, cfg)
+    except ValueError:
+        return []
+    return [bind.path for bind in binds if bind.writable or not writable_only]
+
+
+def job_write_roots(job_id: str, cfg: BuildupConfig) -> list[Path]:
+    """Directories the job may write to: its workspace plus writable binds."""
+    job_base = _validated_job_base(
+        job_id, cfg, operation="WRITE", requested_path=cfg.workspace_dir,
+    )
+    return [job_base] + _bind_roots(job_id, cfg, writable_only=True)
+
+
+def job_read_roots(job_id: str, cfg: BuildupConfig) -> list[Path]:
+    """Directories the job's file tools search: its workspace plus every bind."""
+    job_base = _validated_job_base(
+        job_id, cfg, operation="READ", requested_path=cfg.workspace_dir,
+    )
+    return [job_base] + _bind_roots(job_id, cfg, writable_only=False)
+
+
 def require_write(
     path: Path,
     job_id: str,
@@ -133,21 +159,22 @@ def require_write(
 ) -> Path:
     """Validate a path for WRITE access.
 
-    WRITE is allowed **only** inside ``workspace/{job_id}/``.
+    WRITE is allowed inside ``workspace/{job_id}/`` and inside any directory the
+    user bound to this job with write access.
 
     Returns the resolved, validated path.
     """
     resolved = _resolve(path)
-    job_base = _validated_job_base(
-        job_id, cfg, operation="WRITE", requested_path=path,
-    )
+    allowed_roots = job_write_roots(job_id, cfg)
 
-    if not _is_within(resolved, job_base):
+    if not any(_is_within(resolved, root) for root in allowed_roots):
+        readable = "\n".join(f"    {root}" for root in allowed_roots)
         raise SandboxViolation(
             "WRITE", resolved,
-            f"쓰기는 현재 job 폴더 내부에서만 허용됩니다.\n"
-            f"  허용 범위: {job_base}\n"
-            f"  요청 경로: {resolved}",
+            f"쓰기는 현재 job 폴더 또는 쓰기 가능한 bind 안에서만 허용됩니다.\n"
+            f"  허용 범위:\n{readable}\n"
+            f"  요청 경로: {resolved}\n"
+            f"  (읽기 전용 bind에 쓰려면: buildup job bind <경로> --write)",
         )
 
     if resolved.exists() and not _is_symlink_safe(path):

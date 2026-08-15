@@ -37,6 +37,46 @@ def _package_available(*names: str) -> bool:
     return any(importlib.util.find_spec(name) is not None for name in names)
 
 
+def _gib(num_bytes: float) -> str:
+    return f"{num_bytes / (1024 ** 3):.0f}GB"
+
+
+def _stale_env_vars() -> List[str]:
+    """Pre-rename FRIDAY_* variables, which load_config no longer reads."""
+    return sorted(name for name in os.environ if name.startswith("FRIDAY_"))
+
+
+def _total_ram_bytes() -> int:
+    try:
+        return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+    except (AttributeError, OSError, ValueError):
+        return 0
+
+
+def _job_count(workspace: Path) -> int:
+    try:
+        return sum(1 for path in workspace.iterdir() if path.is_dir())
+    except OSError:
+        return 0
+
+
+def _stranded_workspaces(cfg: BuildupConfig) -> List[Path]:
+    """Workspaces holding jobs that the configured base_dir does not point at.
+
+    A renamed product or a moved base_dir silently hides existing jobs, so the
+    check looks where earlier versions used to keep them.
+    """
+    configured = cfg.workspace_dir.expanduser().resolve()
+    found: List[Path] = []
+    for base in (Path.home() / ".friday", Path.cwd()):
+        candidate = (base / "workspace").expanduser()
+        if candidate.resolve() == configured or not candidate.is_dir():
+            continue
+        if _job_count(candidate):
+            found.append(candidate)
+    return found
+
+
 def _browser_runtime() -> tuple[bool, str]:
     if not _package_available("playwright"):
         return False, "Playwright package is not installed"
@@ -102,12 +142,18 @@ def run_doctor(cfg: BuildupConfig, session: Any) -> DoctorReport:
     except Exception as exc:
         checks.append(DoctorCheck("Session database", "FAIL", str(exc)))
 
+    model_sizes: dict[str, int] = {}
     try:
         response = session.get(cfg.ollama_health_url, timeout=5)
         response.raise_for_status()
         payload = response.json()
         names = {
             str(item.get("name") or item.get("model") or "")
+            for item in payload.get("models", [])
+            if isinstance(item, dict)
+        }
+        model_sizes = {
+            str(item.get("name") or item.get("model") or ""): int(item.get("size") or 0)
             for item in payload.get("models", [])
             if isinstance(item, dict)
         }
@@ -121,11 +167,67 @@ def run_doctor(cfg: BuildupConfig, session: Any) -> DoctorReport:
         detail = (
             "connected · research/reviewer models found"
             if model_ok
-            else "missing: " + ", ".join(sorted(missing_models))
+            else (
+                "missing: " + ", ".join(sorted(missing_models))
+                + " · run: " + "; ".join(f"ollama pull {m}" for m in sorted(missing_models))
+            )
         )
         checks.append(DoctorCheck("Ollama research models", "PASS" if model_ok else "FAIL", detail))
     except Exception as exc:
-        checks.append(DoctorCheck("Ollama + research model", "FAIL", str(exc)))
+        checks.append(DoctorCheck(
+            "Ollama + research model",
+            "FAIL",
+            f"{exc} · is `ollama serve` running at {cfg.ollama_health_url}?",
+        ))
+
+    ram_bytes = _total_ram_bytes()
+    weight_bytes = sum(
+        model_sizes.get(model, 0) for model in {cfg.research_model, cfg.reviewer_model}
+    )
+    if ram_bytes and weight_bytes:
+        # Ollama cannot hold both sets of weights plus a long-context KV cache
+        # much past ~70% of physical memory, so it evicts and reloads instead.
+        crowded = weight_bytes > ram_bytes * 0.7
+        checks.append(DoctorCheck(
+            "Model memory",
+            "WARN" if crowded else "PASS",
+            f"research+reviewer weights {_gib(weight_bytes)} vs {_gib(ram_bytes)} RAM · "
+            + (
+                "too tight to keep both resident; expect a model reload before the "
+                "audit pass, or pick a smaller reviewer model"
+                if crowded
+                else "both models fit alongside each other"
+            ),
+            required=False,
+        ))
+
+    stale_env = _stale_env_vars()
+    checks.append(DoctorCheck(
+        "Legacy environment",
+        "WARN" if stale_env else "PASS",
+        (
+            "ignored since the Build-up rename; rename these to BUILDUP_*: "
+            + ", ".join(stale_env)
+            if stale_env
+            else "no stale FRIDAY_* variables"
+        ),
+        required=False,
+    ))
+
+    configured_jobs = _job_count(cfg.workspace_dir)
+    stranded = _stranded_workspaces(cfg)
+    checks.append(DoctorCheck(
+        "Workspace data",
+        "WARN" if not configured_jobs and stranded else "PASS",
+        (
+            f"{cfg.workspace_dir} has no jobs, but jobs exist in "
+            + ", ".join(str(path) for path in stranded)
+            + " · set BUILDUP_BASE_DIR to that root, or move the data across"
+            if not configured_jobs and stranded
+            else f"{cfg.workspace_dir} · {configured_jobs} job(s)"
+        ),
+        required=False,
+    ))
 
     browser_ready, browser_detail = (
         _browser_runtime()
@@ -163,7 +265,14 @@ def run_doctor(cfg: BuildupConfig, session: Any) -> DoctorReport:
             if availability[name]
         ]
         search_ready = bool(usable)
-        detail = ", ".join(usable) + " available" if usable else "no usable search provider"
+        detail = (
+            ", ".join(usable) + " available"
+            if usable
+            else (
+                "no usable search provider · checked Tavily, Brave, Exa, OpenAlex, "
+                "SearXNG, Google CSE · set one, e.g. export TAVILY_API_KEY=..."
+            )
+        )
         if cfg.browser_search_enabled and not browser_ready:
             detail += f"; browser unavailable: {browser_detail}"
     else:
@@ -171,7 +280,10 @@ def run_doctor(cfg: BuildupConfig, session: Any) -> DoctorReport:
         detail = (
             f"{labels.get(selected_provider, selected_provider)} available"
             if search_ready
-            else f"selected provider {selected_provider!r} is not ready"
+            else (
+                f"selected provider {selected_provider!r} is not ready · "
+                f"set its credentials or use BUILDUP_SEARCH_PROVIDER=auto"
+            )
         )
         if selected_provider == "browser" and not browser_ready:
             detail += f": {browser_detail}"
@@ -194,7 +306,9 @@ def run_doctor(cfg: BuildupConfig, session: Any) -> DoctorReport:
     checks.append(DoctorCheck(
         "build-up skills",
         "PASS" if not missing_skills else "FAIL",
-        "3 core skills found" if not missing_skills else "missing: " + ", ".join(missing_skills),
+        "3 core skills found"
+        if not missing_skills
+        else "missing: " + ", ".join(missing_skills) + " · run: buildup skills reindex",
     ))
     return DoctorReport(checks)
 

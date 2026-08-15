@@ -431,26 +431,31 @@ def _exec_rewrite_file(params: Dict[str, Any], ctx: ToolContext) -> Tuple[str, O
 
 def _exec_glob_files(params: Dict[str, Any], ctx: ToolContext) -> Tuple[str, Optional[str]]:
     from buildup.paths import glob_job
-    from buildup.state import job_dir
+    from buildup.sandbox import job_read_roots
     pattern = params.get("pattern", "**/*")
     jid = _current_job(ctx)
-    base = job_dir(jid, ctx.cfg)
-    results = glob_job(base, pattern)
+    roots = job_read_roots(jid, ctx.cfg)
+    results = list(glob_job(roots[0], pattern))
+    for root in roots[1:]:
+        results.extend(f"{root}/{name}" for name in glob_job(root, pattern))
     return ("\n".join(results[:100]) if results else "(매칭 없음)"), None
 
 
 def _exec_grep_files(params: Dict[str, Any], ctx: ToolContext) -> Tuple[str, Optional[str]]:
     from buildup.paths import grep_job
-    from buildup.state import job_dir
+    from buildup.sandbox import job_read_roots
     pattern = params.get("pattern", "")
     if not pattern:
         return "[오류] grep_files: pattern이 비어 있습니다.", None
     path_glob = params.get("path_glob", "**/*")
     case_insensitive = bool(params.get("case_insensitive", False))
     jid = _current_job(ctx)
-    base = job_dir(jid, ctx.cfg)
+    roots = job_read_roots(jid, ctx.cfg)
+    results: list[str] = []
     try:
-        results = grep_job(base, pattern, path_glob=path_glob, case_insensitive=case_insensitive)
+        for index, root in enumerate(roots):
+            hits = grep_job(root, pattern, path_glob=path_glob, case_insensitive=case_insensitive)
+            results.extend(hits if index == 0 else [f"{root}/{hit}" for hit in hits])
     except ValueError as exc:
         return f"[오류] grep_files: {exc}", None
     return ("\n".join(results[:80]) if results else "(매칭 없음)"), None

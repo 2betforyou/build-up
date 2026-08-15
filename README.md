@@ -271,15 +271,16 @@ Source ID는 canonical URL, Evidence ID는 source ID와 exact passage, Claim ID�
 - 논문 library, page-aware PDF 추출과 한국어 번역
 - 연구 결과를 잇는 Socratic study와 D+1/D+7/D+30 review
 - 원본 citation을 보존하는 append-only Knowledge Vault와 Study 기반 verified 승격
-- file/calendar/job 관리
+- file/calendar/job 관리와 실제 디렉터리를 그 자리에서 다루는 job bind
 - Tier-0/Tier-1/Tier-2 intent dispatch, constrained plan state machine, ReAct fallback
-- workspace path sandbox, soft delete, exact-argument process/Git confirmation
+- workspace path sandbox와 명시적 opt-in bind, soft delete, exact-argument process/Git confirmation
 - local `SKILL.md` discovery와 audit
 
 | Command | 기능 |
 |---|---|
 | `buildup` | interactive shell |
-| `buildup doctor` | model, storage, search, skill readiness |
+| `buildup doctor` | model, storage, search, skill readiness와 설정 정합성 점검 |
+| `buildup job bind PATH [--write]` | 실제 디렉터리를 현재 job에 연결 (기본 읽기 전용) |
 | `buildup research QUERY` | adaptive deep research |
 | `buildup wiki status|add|ask|review|lint` | grounded compounding knowledge |
 | `buildup search QUERY` | lightweight web search + answer |
@@ -287,6 +288,30 @@ Source ID는 canonical URL, Evidence ID는 source ID와 exact passage, Claim ID�
 | `buildup study start TOPIC` | personal study workflow |
 | `buildup sessions` | current-workspace transcripts |
 | `buildup skills audit` | packaged/local skill validation |
+
+## Job bind
+
+기본적으로 job은 `workspace/<job-id>/` 안에서만 파일을 만들고 고칩니다. 이미 가지고 있는
+논문 폴더, 원고, 소스 트리를 복사해 들여오지 않고 그 자리에서 다루려면 디렉터리를
+현재 job에 bind합니다.
+
+```bash
+buildup job bind ~/papers/persona-attack
+buildup job bind ~/papers/persona-attack --write
+buildup job binds
+buildup job unbind ~/papers/persona-attack
+```
+
+bind는 **기본이 읽기 전용**이고 `--write`를 붙여야 쓰기가 열립니다. bind된 경로는
+`read_file`, `list_files`, `glob_files`, `grep_files`의 탐색 범위에 함께 들어가며,
+쓰기 가능한 bind에서만 `write_file`과 `edit_file`이 동작합니다.
+
+다음은 bind로도 열 수 없습니다.
+
+- Build-up 데이터 루트를 포함하는 경로 (state, session DB, cache 노출 방지)
+- `$HOME` 전체와 파일시스템 루트
+- 심볼릭 링크
+- bind 범위를 벗어나는 절대 경로와 `../` 상위 탈출
 
 ## Data와 보안
 
@@ -308,6 +333,7 @@ Source ID는 canonical URL, Evidence ID는 source ID와 exact passage, Claim ID�
 - robots.txt, response size, redirect count, content type, timeout을 검사합니다.
 - PDF와 HTML에서 추출한 본문은 길이 제한 후 hash와 함께 저장합니다. reader가 직접 받은 PDF는 추출문과 별도로 run 내부에 원 byte를 보존하며 PDF cache를 재사용하지 않습니다.
 - 실패한 model response는 성공 artifact로 취급하지 않고 diagnostic 파일로 격리합니다.
+- 파일 쓰기는 현재 job workspace와, 사용자가 `--write`로 직접 bind한 디렉터리에서만 허용됩니다.
 - 에이전트의 process/Git 도구는 실행 전 정확한 인수를 표시하고 승인을 요구합니다. Process 실행은 `shell=True`를 쓰지 않으며 파이프·리다이렉션·명령 치환을 거부하고 시간·출력 크기를 제한합니다.
 - 사용자가 직접 입력하는 `/shell`은 명시적인 power-user 기능입니다. 단일 허용 명령만 실행하지만 OS 수준 컨테이너가 아니므로, 그 명령 자체가 접근할 수 있는 로컬 파일·네트워크 권한까지 격리하지는 않습니다.
 - Web query와 공개 page request는 선택한 외부 공급자 또는 검색 엔진으로 전송됩니다.
