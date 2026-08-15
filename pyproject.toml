@@ -26,7 +26,7 @@ dependencies = [
   "pdfminer.six>=20231228",
   "pyfiglet>=1.0,<2",
   "requests>=2.31,<3",
-  "rich>=13.7,<15",
+  "rich>=13.7,<16",
 ]
 
 [project.scripts]
