@@ -7,14 +7,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from friday.config import FridayConfig
-from friday.paper import PaperPage
-from friday.paper_translation import TranslationTarget, translate_paper_pdf
+from buildup.config import BuildupConfig
+from buildup.paper import PaperPage
+from buildup.paper_translation import TranslationTarget, translate_paper_pdf
 
 
 class PaperTranslationTests(unittest.TestCase):
-    def _target(self, root: Path) -> tuple[FridayConfig, TranslationTarget]:
-        cfg = FridayConfig(base_dir=root, night_model="translation-model")
+    def _target(self, root: Path) -> tuple[BuildupConfig, TranslationTarget]:
+        cfg = BuildupConfig(base_dir=root, research_model="translation-model")
         job_id = "20260812-120000-paper"
         base = cfg.workspace_dir / job_id
         base.mkdir(parents=True)
@@ -39,13 +39,13 @@ class PaperTranslationTests(unittest.TestCase):
             def fake_chat(session, cfg, model, messages, **kwargs):
                 calls.append(messages)
                 prompt = messages[-1]["content"]
-                tokens = re.findall(r"\[\[\[NIGHT_KEEP_\d{4}\]\]\]", prompt)
+                tokens = re.findall(r"\[\[\[BUILDUP_KEEP_\d{4}\]\]\]", prompt)
                 return json.dumps({
                     "translation": "번역 " + " ".join(tokens) + " Machine learning LLM attention",
                     "explanation": "별도 핵심 설명",
                 }, ensure_ascii=False)
 
-            with patch("friday.paper.extract_pdf_pages", return_value=pages):
+            with patch("buildup.paper.extract_pdf_pages", return_value=pages):
                 result = translate_paper_pdf(target, cfg, object(), None, chat_fn=fake_chat)
 
             self.assertEqual(1, result.model_calls)
@@ -55,7 +55,7 @@ class PaperTranslationTests(unittest.TestCase):
             self.assertIn("### 핵심 의미", output)
             self.assertIn("$L(x_i)$", output)
             self.assertIn("[12]", output)
-            self.assertNotIn("NIGHT_KEEP", output)
+            self.assertNotIn("BUILDUP_KEEP", output)
 
     def test_long_translation_chunks_have_independent_histories(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -69,13 +69,13 @@ class PaperTranslationTests(unittest.TestCase):
             def fake_chat(session, cfg, model, messages, **kwargs):
                 calls.append(messages)
                 prompt = messages[-1]["content"]
-                tokens = re.findall(r"\[\[\[NIGHT_KEEP_\d{4}\]\]\]", prompt)
+                tokens = re.findall(r"\[\[\[BUILDUP_KEEP_\d{4}\]\]\]", prompt)
                 return json.dumps({
                     "translation": "번역 " + " ".join(tokens),
                     "explanation": "설명",
                 }, ensure_ascii=False)
 
-            with patch("friday.paper.extract_pdf_pages", return_value=pages):
+            with patch("buildup.paper.extract_pdf_pages", return_value=pages):
                 result = translate_paper_pdf(
                     target,
                     cfg,

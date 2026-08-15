@@ -6,10 +6,10 @@ import unittest
 from datetime import date, timedelta
 from pathlib import Path
 
-from friday.calendar_mgr import cal_list
-from friday.config import FridayConfig
-from friday.jobs import cmd_job_new
-from friday.study import (
+from buildup.calendar_mgr import cal_list
+from buildup.config import BuildupConfig
+from buildup.jobs import cmd_job_new
+from buildup.study import (
     append_study_note,
     complete_study_review,
     due_studies,
@@ -22,7 +22,7 @@ from friday.study import (
 class StudyTests(unittest.TestCase):
     def test_study_links_research_creates_files_and_schedules_reviews(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            cfg = FridayConfig(base_dir=Path(temp_dir))
+            cfg = BuildupConfig(base_dir=Path(temp_dir))
             job_id, _ = cmd_job_new("study-test", cfg, "study")
             source = cfg.workspace_dir / job_id / "deep-research" / "run"
             source.mkdir(parents=True)
@@ -59,7 +59,7 @@ class StudyTests(unittest.TestCase):
 
     def test_completed_review_is_not_reported_due_again(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            cfg = FridayConfig(base_dir=Path(temp_dir))
+            cfg = BuildupConfig(base_dir=Path(temp_dir))
             job_id, _ = cmd_job_new("review-test", cfg, "study")
             info = start_study("복습 대상", job_id, cfg)
             first_due = date.fromisoformat(info.review_dates[0])

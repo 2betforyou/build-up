@@ -3,13 +3,9 @@
 script_dir="${0:A:h}"
 if [[ -n "${BUILDUP_PYTHON:-}" ]]; then
   buildup_python="$BUILDUP_PYTHON"
-elif [[ -n "${NIGHT_PYTHON:-}" ]]; then
-  # Compatibility with the previous launcher.
-  buildup_python="$NIGHT_PYTHON"
 elif [[ -x "$script_dir/.venv/bin/python" ]]; then
   buildup_python="$script_dir/.venv/bin/python"
 elif [[ -x "/opt/homebrew/anaconda3/bin/python3" ]]; then
-  # Backward-compatible runtime used by the existing local installation.
   buildup_python="/opt/homebrew/anaconda3/bin/python3"
 else
   buildup_python="python3"

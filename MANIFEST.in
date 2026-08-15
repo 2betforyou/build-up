@@ -1,0 +1,10 @@
+include .env.example
+include CHANGELOG.md
+include CONTRIBUTING.md
+include README.md
+include SECURITY.md
+include buildup
+include requirements.txt
+include router/run_buildup.py
+recursive-include router/buildup/builtin_skills *.md *.yaml
+recursive-include tests *.py

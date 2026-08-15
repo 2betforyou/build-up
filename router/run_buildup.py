@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Canonical build-up CLI entry point."""
 
-from friday.cli import main
+from buildup.cli import main
 
 
 if __name__ == "__main__":

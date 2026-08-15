@@ -6,9 +6,17 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from friday.config import FridayConfig
-from friday.jobs import cmd_job_new
-from friday.session_store import (
+from rich.console import Console
+
+from buildup.config import BuildupConfig
+from buildup.jobs import (
+    cmd_job_new,
+    cmd_job_rename,
+    format_job_label,
+    job_display_name,
+)
+from buildup.rendering import render_previous_conversation
+from buildup.session_store import (
     SessionInfo,
     list_sessions,
     load_session,
@@ -16,13 +24,63 @@ from friday.session_store import (
     resolve_session,
     save_session,
 )
-from friday.shell import InteractiveShell
+from buildup.shell import InteractiveShell
 
 
 class SessionUxTests(unittest.TestCase):
+    def test_previous_conversation_card_has_aligned_roles_without_emoji(self) -> None:
+        output = Console(record=True, width=100, color_system=None)
+        messages = [
+            {"role": "user", "content": "이 논문의 핵심 가정은 뭐야?"},
+            {"role": "assistant", "content": "핵심 가정은 독립적인 평가 분포입니다."},
+        ]
+
+        with patch("buildup.rendering.console", output):
+            render_previous_conversation(
+                "논문 분석",
+                messages,
+                turn_count=1,
+                updated_at="2026-08-13T19:30:00",
+            )
+
+        rendered = output.export_text()
+        self.assertIn("previous conversation", rendered)
+        self.assertIn("session", rendered)
+        self.assertIn("you", rendered)
+        self.assertIn("build-up", rendered)
+        self.assertNotIn("●", rendered)
+        self.assertNotIn("◆", rendered)
+
+    def test_job_display_name_changes_context_without_changing_job_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cfg = BuildupConfig(base_dir=Path(temp_dir))
+            job_id, _ = cmd_job_new("todolist", cfg, "research")
+            workspace = cfg.workspace_dir / job_id
+            save_session(
+                "stable-job-session",
+                [{"role": "user", "content": "기존 연구"}],
+                job_id,
+                cfg,
+            )
+
+            display_name = cmd_job_rename(job_id, "Qwen 3.8 Research", cfg)
+
+            self.assertEqual("Qwen 3.8 Research", display_name)
+            self.assertEqual(display_name, job_display_name(job_id, cfg))
+            self.assertIn(job_id, format_job_label(job_id, cfg))
+            self.assertTrue(workspace.is_dir())
+            session = load_session("stable-job-session", cfg)
+            self.assertEqual(job_id, session.job_id)
+            self.assertEqual(f"job:{job_id}", session.workspace_key)
+
+            shell = InteractiveShell(cfg, object(), logging.getLogger("test-job-name"))
+            self.assertEqual(display_name, shell._prompt_context_label())
+            with self.assertRaises(ValueError):
+                cmd_job_rename(job_id, "   ", cfg)
+
     def test_session_context_round_trip_and_number_resolution(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            cfg = FridayConfig(base_dir=Path(temp_dir))
+            cfg = BuildupConfig(base_dir=Path(temp_dir))
             messages = [
                 {"role": "user", "content": "첫 질문"},
                 {"role": "assistant", "content": "첫 답변"},
@@ -32,7 +90,7 @@ class SessionUxTests(unittest.TestCase):
                 messages,
                 None,
                 cfg,
-                assistant_mode="nighttime",
+                assistant_mode="research",
                 response_mode="main",
                 active_paper_id="paper-1",
                 paper_reviewer_mode=True,
@@ -53,14 +111,14 @@ class SessionUxTests(unittest.TestCase):
 
     def test_renamed_title_survives_later_autosave(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            cfg = FridayConfig(base_dir=Path(temp_dir))
+            cfg = BuildupConfig(base_dir=Path(temp_dir))
             messages = [{"role": "user", "content": "자동 생성 제목"}]
             save_session("rename-me", messages, None, cfg)
             self.assertTrue(rename_session("rename-me", "내 연구 대화", cfg))
             save_session("rename-me", messages, None, cfg)
             self.assertEqual("내 연구 대화", load_session("rename-me", cfg).title)
 
-    def test_legacy_session_defaults_to_isolated_night_context(self) -> None:
+    def test_legacy_session_defaults_to_isolated_research_context(self) -> None:
         info = SessionInfo(
             session_id="legacy",
             created_at="2026-08-12T10:00:00",
@@ -72,7 +130,7 @@ class SessionUxTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as temp_dir:
             shell = InteractiveShell(
-                FridayConfig(base_dir=Path(temp_dir)),
+                BuildupConfig(base_dir=Path(temp_dir)),
                 object(),
                 logging.getLogger("test-session-ux"),
             )
@@ -83,7 +141,7 @@ class SessionUxTests(unittest.TestCase):
 
             shell._restore_session(info)
 
-            self.assertEqual("nighttime", shell.assistant_mode)
+            self.assertEqual("research", shell.assistant_mode)
             self.assertIsNone(shell.active_paper_id)
             self.assertFalse(shell.paper_reviewer_mode)
             self.assertEqual("default", shell.steering.profile)
@@ -92,7 +150,7 @@ class SessionUxTests(unittest.TestCase):
     def test_short_commands_and_natural_language_route_without_model(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             shell = InteractiveShell(
-                FridayConfig(base_dir=Path(temp_dir)),
+                BuildupConfig(base_dir=Path(temp_dir)),
                 object(),
                 logging.getLogger("test-session-shortcuts"),
             )
@@ -111,7 +169,7 @@ class SessionUxTests(unittest.TestCase):
     def test_new_conversation_resets_session_scoped_context(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             shell = InteractiveShell(
-                FridayConfig(base_dir=Path(temp_dir)),
+                BuildupConfig(base_dir=Path(temp_dir)),
                 object(),
                 logging.getLogger("test-session-reset"),
             )
@@ -120,11 +178,11 @@ class SessionUxTests(unittest.TestCase):
             shell.paper_reviewer_mode = True
             shell.steering.profile = "critical"
 
-            with patch("friday.shell.render_info"):
+            with patch("buildup.shell.render_info"):
                 shell._start_new_session()
 
             self.assertEqual(0, shell.history.turn_count)
-            self.assertEqual("nighttime", shell.assistant_mode)
+            self.assertEqual("research", shell.assistant_mode)
             self.assertIsNone(shell.active_paper_id)
             self.assertFalse(shell.paper_reviewer_mode)
             self.assertEqual("default", shell.steering.profile)
@@ -132,7 +190,7 @@ class SessionUxTests(unittest.TestCase):
 
     def test_study_starts_in_a_new_session_but_keeps_the_same_job(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            cfg = FridayConfig(base_dir=Path(temp_dir))
+            cfg = BuildupConfig(base_dir=Path(temp_dir))
             job_id, _ = cmd_job_new("research-to-study", cfg, "research")
             shell = InteractiveShell(cfg, object(), logging.getLogger("test-study-isolation"))
             shell._acquire_session_lease(shell._session_id)
@@ -143,7 +201,7 @@ class SessionUxTests(unittest.TestCase):
             ])
             research_session_id = shell._session_id
 
-            with patch("friday.shell.render_info"):
+            with patch("buildup.shell.render_info"):
                 shell._cmd_study("/study start attention mechanisms")
 
             self.assertNotEqual(research_session_id, shell._session_id)
@@ -160,7 +218,7 @@ class SessionUxTests(unittest.TestCase):
     def test_retry_does_not_remove_a_research_workflow(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             shell = InteractiveShell(
-                FridayConfig(base_dir=Path(temp_dir)),
+                BuildupConfig(base_dir=Path(temp_dir)),
                 object(),
                 logging.getLogger("test-retry-research"),
             )
@@ -168,7 +226,7 @@ class SessionUxTests(unittest.TestCase):
                 {"role": "user", "content": "[deep research] attention"},
                 {"role": "assistant", "content": "report"},
             ])
-            with patch("friday.shell.render_info") as render:
+            with patch("buildup.shell.render_info") as render:
                 shell._cmd_retry("/retry")
             self.assertEqual(2, len(shell.history.raw_messages()))
             self.assertIn("workflow", render.call_args.args[1])

@@ -16,8 +16,8 @@
 # Internal agent instructions and development notes
 /AGENTS.md
 /CLAUDE.md
-/Friday_Project_Summary.md
-/Friday_Technical_Design.md
+/Buildup_Project_Summary.md
+/Buildup_Technical_Design.md
 /REDESIGN_LOG.md
 
 # Python bytecode, environments, and build output
@@ -67,15 +67,16 @@ htmlcov/
 
 # build-up local caches and state
 /.embed_cache.json
-/.friday_history
-/.friday_traces.jsonl
+/.buildup_history
 /state.json
+/.state-corrupt-*.json
 
 # Personal sessions, papers, memories, and generated artifacts
 /calendar/
 /data/
 /export/
 /inbox/
+/knowledge/
 /library/
 /logs/
 /papers/

@@ -1,0 +1,25 @@
+name: Bug report
+description: Report a reproducible Build-up defect
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Build-up version
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Include commands, expected behavior, and actual behavior. Remove secrets and private data.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python, Ollama, models, and configured search provider.
+    validations:
+      required: true
