@@ -190,7 +190,18 @@ def _explicit_file_mentions(text: str, files: List[str]) -> List[TargetCandidate
         raw = match.group("path").strip(" .")
         # Prefer a real workspace file when the basename matches.
         raw_base = Path(raw).name.lower()
-        matched = next((f for f in files if f.lower() == raw.lower() or Path(f).name.lower() == raw_base), raw)
+        matched = next(
+            (f for f in files if f.lower() == raw.lower() or Path(f).name.lower() == raw_base),
+            None,
+        )
+        # Never turn arbitrary surrounding prose ending in ".pdf" into a
+        # phantom file candidate.  If it is not already a known workspace
+        # file, only accept it when it resolves to a real local file.
+        if matched is None:
+            candidate_path = Path(raw).expanduser()
+            if not candidate_path.is_file():
+                continue
+            matched = str(candidate_path)
         if matched not in seen:
             seen.add(matched)
             results.append(TargetCandidate("file", matched, matched, "explicit_path", 0.95))
@@ -340,6 +351,27 @@ def build_task_frame(
         proposed_steps=_steps_for(task_type, targets),
     )
 
+
+
+def bind_target_candidate(frame: TaskFrame, target: TargetCandidate) -> TaskFrame:
+    """Resolve a previously presented target candidate without reparsing text.
+
+    This is used by the interactive shell after a clarification prompt.  The
+    selected candidate is injected directly so that an answer such as "1번"
+    cannot be reinterpreted as a paper-shelf index and the original natural
+    language request is not reparsed with a filename appended to it.
+    """
+    missing = [slot for slot in frame.missing_slots if slot != "target_file"]
+    ambiguities = [slot for slot in frame.ambiguities if slot != "target_file"]
+    return replace(
+        frame,
+        targets=[target],
+        candidate_targets=[],
+        missing_slots=missing,
+        ambiguities=ambiguities,
+        confidence=max(frame.confidence, target.confidence, 0.9),
+        proposed_steps=_steps_for(frame.task_type, [target]),
+    )
 
 def _looks_like_active_paper_request(frame: TaskFrame) -> bool:
     """Return True when a research-mode utterance should bind to active paper."""

@@ -92,6 +92,7 @@ from buildup.intent import is_chat, parse_intent_instant
 from buildup.trace import TraceRecorder
 from buildup.task_frame import (
     bind_active_paper_target,
+    bind_target_candidate,
     build_task_frame,
     enrich_intent_with_frame,
     format_execution_preview,
@@ -444,6 +445,9 @@ class InteractiveShell:
         self.active_paper_id: Optional[str] = None
         self.active_study_id: Optional[str] = None
         self._last_wiki_claim_ids: List[str] = []
+        # Last blocking file clarification.  Keep the exact TaskFrame so the
+        # user's next reply can select from the candidates that were shown.
+        self._pending_target_frame = None
         self.steering = SteeringState()
         self.running = True
         self.history = ConversationHistory(max_turns=cfg.max_history_turns)
@@ -793,6 +797,48 @@ class InteractiveShell:
             return True
         return False
 
+
+    def _handle_pending_target_selection(self, user_input: str) -> bool:
+        """Resolve a reply to the most recent file-disambiguation prompt."""
+        frame = self._pending_target_frame
+        if not frame or not frame.candidate_targets:
+            return False
+
+        text = re.sub(r"\s+", " ", user_input.strip())
+        selected = None
+
+        number_match = re.fullmatch(r"(?:논문\s*)?(\d+)\s*번?", text)
+        if number_match:
+            index = int(number_match.group(1)) - 1
+            if 0 <= index < len(frame.candidate_targets):
+                selected = frame.candidate_targets[index]
+            else:
+                render_info(
+                    "확인 필요",
+                    f"1~{len(frame.candidate_targets)} 사이의 번호를 입력해 주세요.",
+                    "yellow",
+                )
+                return True
+        else:
+            cleaned = text.strip().strip("\"'")
+            matches = [
+                cand
+                for cand in frame.candidate_targets
+                if cleaned == cand.value
+                or cleaned == cand.value.rsplit("/", 1)[-1]
+            ]
+            if len(matches) == 1:
+                selected = matches[0]
+
+        if selected is None:
+            return False
+
+        self._pending_target_frame = None
+        # Crucially, do not append the selected filename to raw_input and
+        # reparse it.  Inject the candidate directly into the existing frame.
+        self._dispatch(frame.raw_input, forced_target=selected)
+        return True
+
     def _handle_paper_shortcut(self, user_input: str) -> bool:
         if self.assistant_mode != "research":
             return False
@@ -952,6 +998,8 @@ class InteractiveShell:
                     continue
                 if self._handle_assistant_mode_toggle(user_input):
                     continue
+                if self._handle_pending_target_selection(user_input):
+                    continue
                 if self._handle_paper_shortcut(user_input):
                     continue
                 if self._handle_wiki_shortcut(user_input):
@@ -965,7 +1013,7 @@ class InteractiveShell:
                 mark_session_status(self._session_id, "ended", self.cfg)
             self._release_session_lease()
 
-    def _dispatch(self, user_input: str) -> None:
+    def _dispatch(self, user_input: str, forced_target=None) -> None:
         cmd_key = user_input.split()[0] if user_input.startswith("/") else None
 
         if cmd_key and cmd_key in self._commands:
@@ -982,16 +1030,21 @@ class InteractiveShell:
 
         tracer = TraceRecorder(self.cfg, self.current_job, user_input)
         frame = self._build_task_frame(user_input)
+        if forced_target is not None:
+            frame = bind_target_candidate(frame, forced_target)
         tracer.set_task_frame(frame)
         try:
             clarification = frame_clarification(frame)
             if clarification and frame.task_type != "chat":
+                self._pending_target_frame = frame if frame.candidate_targets else None
                 tracer.set_tier("frame")
                 tracer.set_policy(False, "clarify")
                 render_info("확인 필요", clarification, "yellow")
                 tracer.flush("clarification_requested", success=False)
                 console.print()
                 return
+
+            self._pending_target_frame = None
 
             # ── Tier-0: pure chat → streaming answer (1 LLM call, no agent) ──
             if is_chat(user_input):
