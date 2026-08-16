@@ -364,6 +364,31 @@ def cmd_job_use(job_id: str, cfg: BuildupConfig) -> Path:
     return path
 
 
+def resolve_job_selector(selector: str, cfg: BuildupConfig) -> Optional[str]:
+    """Resolve a job id, 1-based list index, or a fuzzy display-name fragment.
+
+    Lets a user type a recognisable fragment ("report" instead of the full
+    timestamped id) the way session/file pickers elsewhere in build-up
+    already allow, without requiring an exact id.
+    """
+    value = selector.strip()
+    if not value:
+        return None
+    jobs = cmd_job_list(cfg)
+    if value in jobs:
+        return value
+    if value.isdigit():
+        index = int(value)
+        return jobs[index - 1] if 1 <= index <= len(jobs) else None
+    needle = value.lower()
+    labeled = [(jid, job_display_name(jid, cfg)) for jid in jobs]
+    exact = [jid for jid, name in labeled if name.lower() == needle]
+    if len(exact) == 1:
+        return exact[0]
+    contains = [jid for jid, name in labeled if needle in name.lower() or needle in jid.lower()]
+    return contains[0] if len(contains) == 1 else None
+
+
 def cmd_job_rename(job_id: str, new_name: str, cfg: BuildupConfig) -> str:
     """Rename a job for display while preserving its directory and stable ID."""
     job_id = validate_job_id(job_id)

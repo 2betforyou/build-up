@@ -600,7 +600,34 @@ def resolve_session(
         ).fetchone()
         if row:
             return _row_to_info(conn, row)
-    return find_session_by_prefix(value, cfg, workspace_key=workspace_key)
+    prefix_hit = find_session_by_prefix(value, cfg, workspace_key=workspace_key)
+    if prefix_hit is not None:
+        return prefix_hit
+    return _find_session_by_title_fragment(value, cfg, workspace_key=workspace_key)
+
+
+def _find_session_by_title_fragment(
+    fragment: str,
+    cfg: BuildupConfig,
+    *,
+    workspace_key: Optional[str] = None,
+) -> Optional[SessionInfo]:
+    """Fall back to a fuzzy, unique 'contains' match on the title.
+
+    Lets a user type a recognisable fragment ("논문 정리" instead of the full
+    saved title) the way `/resume` already lets them pick from a list.
+    """
+    with _db(cfg) as conn:
+        clauses = ["lower(title) LIKE '%' || lower(?) || '%'", "archived = 0"]
+        params: List[Any] = [fragment]
+        if workspace_key is not None:
+            clauses.append("workspace_key = ?")
+            params.append(workspace_key)
+        rows = conn.execute(
+            "SELECT * FROM sessions WHERE " + " AND ".join(clauses) + " ORDER BY updated_at DESC LIMIT 2",
+            params,
+        ).fetchall()
+        return _row_to_info(conn, rows[0]) if len(rows) == 1 else None
 
 
 def rename_session(session_id: str, new_title: str, cfg: BuildupConfig) -> bool:

@@ -32,6 +32,7 @@ from buildup.jobs import (
     format_job_label,
     job_display_name,
     read_action_log,
+    resolve_job_selector,
     unbind_job_path,
 )
 from buildup.logging_setup import setup_logging
@@ -459,8 +460,14 @@ def main() -> None:
                     msg += "\n\n템플릿:\n  " + "\n  ".join(created)
                 render_info("Job", msg)
             elif args.job_command == "use":
-                path = cmd_job_use(args.job_id, cfg)
-                render_info("Job", f"→ {args.job_id}\n{path}")
+                jid = args.job_id
+                if jid not in cmd_job_list(cfg):
+                    resolved = resolve_job_selector(jid, cfg)
+                    if resolved is None:
+                        raise ValueError(f"job을 찾지 못했습니다: {jid}")
+                    jid = resolved
+                path = cmd_job_use(jid, cfg)
+                render_info("Job", f"→ {jid}\n{path}")
             elif args.job_command == "rename":
                 jid = get_current_job(cfg, required=True)
                 display_name = cmd_job_rename(jid, " ".join(args.name), cfg)

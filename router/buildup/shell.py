@@ -65,6 +65,7 @@ from buildup.conversation_memory import (
 )
 from buildup.agent import run_agent
 from buildup.git_mgr import RequiresConfirmation, git_run
+from buildup.interactive import pick_one
 from buildup.jobs import (
     append_action_log,
     bind_job_path,
@@ -82,6 +83,7 @@ from buildup.jobs import (
     job_display_name,
     list_templates,
     read_action_log,
+    resolve_job_selector,
     unbind_job_path,
 )
 from buildup.embed_classifier import IntentEmbedClassifier
@@ -1756,6 +1758,26 @@ class InteractiveShell:
         else:
             render_info("Error", "Supported modes: auto, fast, main, refine", "red")
 
+    def _interactive_job_pick(self) -> Optional[str]:
+        """Arrow-key job picker; returns the chosen job id, or None if cancelled."""
+        jobs = cmd_job_list(self.cfg)
+        if not jobs:
+            render_info("Job", "(no jobs) `/job new`로 새 job을 만들어줘.", "yellow")
+            return None
+        current = self.current_job
+        choices = [
+            (jid, f"{format_job_label(jid, self.cfg)}{'  ← current' if jid == current else ''}")
+            for jid in jobs
+        ]
+        selected = pick_one("job 전환", choices)
+        if selected is None:
+            lines = [
+                f"  {format_job_label(j, self.cfg)}{' ← current' if j == current else ''}"
+                for j in jobs
+            ]
+            render_info("Jobs", "\n".join(lines) + "\n\n사용법: `/job use JOB_ID`")
+        return selected
+
     def _cmd_job(self, user_input: str) -> None:
         parts = user_input.split()
         sub = parts[1] if len(parts) > 1 else ""
@@ -1814,8 +1836,15 @@ class InteractiveShell:
 
         elif sub == "use":
             if len(parts) < 3:
-                raise ValueError("Usage: /job use JOB_ID")
-            jid = parts[2].strip()
+                jid = self._interactive_job_pick()
+                if jid is None:
+                    return
+            else:
+                typed = " ".join(parts[2:]).strip()
+                jid = typed if typed in cmd_job_list(self.cfg) else resolve_job_selector(typed, self.cfg)
+                if jid is None:
+                    render_info("Job", f"job을 찾지 못했어: {typed}\n`/job list`에서 확인해줘.", "red")
+                    return
             path = cmd_job_use(jid, self.cfg)
             self._start_new_session(job_id=jid, announce=False)
             render_info("Job", f"→ {jid}\n{path}\n새 workspace 대화를 시작했어.")
@@ -2880,12 +2909,32 @@ class InteractiveShell:
     def _cmd_resume(self, user_input: str) -> None:
         selector = user_input.split(maxsplit=1)[1].strip() if len(user_input.split(maxsplit=1)) > 1 else ""
         if not selector:
-            self._cmd_session("/session list")
+            self._interactive_resume()
             return
         if selector.lower() in {"previous", "prev", "이전"}:
             self._resume_previous_session()
             return
         self._load_session_selector(selector)
+
+    def _interactive_resume(self) -> None:
+        """Arrow-key session picker across every workspace, most recent first."""
+        sessions = list_sessions(self.cfg, workspace_key=None, limit=30)
+        if not sessions:
+            render_info("Session", "저장된 대화가 없어.", "yellow")
+            return
+        choices = [
+            (
+                info.session_id,
+                f"{info.title[:48]:<48}  {workspace_label(info.workspace_key):<14}  "
+                f"{info.turn_count:>3}턴  {info.updated_at.replace('T', ' ')[:16]}",
+            )
+            for info in sessions
+        ]
+        selected = pick_one("대화 재개", choices)
+        if selected is None:
+            self._cmd_session("/session list --all")
+            return
+        self._load_session_selector(selected)
 
     def _cmd_session(self, user_input: str) -> None:
         """Workspace-scoped session browser, search, archive, and export."""
@@ -2953,7 +3002,7 @@ class InteractiveShell:
 
         elif sub in {"load", "use", "resume"}:
             if not rest:
-                render_info("Session", "사용법: `/resume 2` 또는 `/session load 2`", "yellow")
+                self._interactive_resume()
                 return
             self._load_session_selector(rest)
 
