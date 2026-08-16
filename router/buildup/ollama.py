@@ -77,6 +77,8 @@ def chat(
     }
     if think is not None:
         payload["think"] = think
+    if cfg.ollama_num_ctx:
+        payload["options"] = {"num_ctx": cfg.ollama_num_ctx}
     if json_schema is not None:
         payload["format"] = json_schema
     elif json_mode:
@@ -147,6 +149,8 @@ def chat_stream(
     }
     if think is not None:
         payload["think"] = think
+    if cfg.ollama_num_ctx:
+        payload["options"] = {"num_ctx": cfg.ollama_num_ctx}
     if logger:
         logger.info("Ollama stream  model=%s  msgs=%d", model, len(messages))
     try:

@@ -30,6 +30,11 @@ class BuildupConfig:
     ollama_timeout: int = 600
     ollama_connect_timeout: int = 10
     ollama_health_url: str = "http://localhost:11434/api/tags"
+    # Context window handed to Ollama.  Ollama grows the KV cache lazily, so this
+    # is a ceiling rather than an upfront cost; 65536 keeps a filled cache plus a
+    # 27B-class model inside 48 GB of unified memory, and stays under the 131072
+    # limit of the smaller local models.  0 falls back to the server default.
+    ollama_num_ctx: int = 65536
 
     # Open WebUI
     openwebui_base_url: str = "http://localhost:3000"
@@ -43,7 +48,7 @@ class BuildupConfig:
 
     # File handling
     text_extensions: frozenset = frozenset({
-        ".txt", ".md", ".py", ".json", ".yaml", ".yml",
+        ".txt", ".md", ".py", ".json", ".jsonl", ".yaml", ".yml",
         ".csv", ".log", ".sh", ".tex", ".toml", ".cfg",
         ".ini", ".rst", ".xml", ".html", ".css", ".js",
         ".ts", ".r", ".jl", ".lua",
@@ -338,6 +343,7 @@ def load_config() -> BuildupConfig:
         struct_model=_env("BUILDUP_STRUCT_MODEL", "qwen2.5:1.5b"),
         max_pdf_bytes=_env_int("BUILDUP_MAX_PDF_BYTES", 50 * 1024 * 1024),
         ollama_health_url=_env("BUILDUP_OLLAMA_HEALTH_URL", "http://localhost:11434/api/tags"),
+        ollama_num_ctx=_env_int("BUILDUP_OLLAMA_NUM_CTX", 65536),
         openwebui_base_url=_env("OPENWEBUI_BASE_URL", "http://localhost:3000"),
         openwebui_token=_env("OPENWEBUI_TOKEN", ""),
         openwebui_kb_research=_env("OPENWEBUI_KB_RESEARCH", ""),

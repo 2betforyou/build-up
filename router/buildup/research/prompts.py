@@ -185,6 +185,32 @@ AUDIT_SCHEMA: Dict[str, Any] = {
 }
 
 
+# Ollama (0.32.x) fails to compile a string bound of exactly 2000 into its GBNF
+# grammar and answers 400 "Failed to initialize samplers: failed to parse
+# grammar".  It reproduces only on the path this module uses — stream=false with
+# no num_predict — which is why plain chat never hits it.  Neighbouring bounds
+# (1999, 2001, 2048, 4000, 20000) all compile, so nudge just that one value.
+_BROKEN_MAX_LENGTH = 2_000
+_REPLACEMENT_MAX_LENGTH = 2_048
+
+
+def _avoid_broken_max_length(node: Any) -> None:
+    if isinstance(node, dict):
+        if node.get("type") == "string" and node.get("maxLength") == _BROKEN_MAX_LENGTH:
+            node["maxLength"] = _REPLACEMENT_MAX_LENGTH
+        for value in node.values():
+            _avoid_broken_max_length(value)
+    elif isinstance(node, list):
+        for value in node:
+            _avoid_broken_max_length(value)
+
+
+for _schema in (
+    PLAN_SCHEMA, EVIDENCE_SCHEMA, ASSESSMENT_SCHEMA, WRITER_SCHEMA, AUDIT_SCHEMA,
+):
+    _avoid_broken_max_length(_schema)
+
+
 def plan_messages(query: str, depth: str, max_tasks: int) -> list[dict[str, str]]:
     system = """You are Build-up's research coordinator. Convert the user's request into a bounded
 research contract and a non-overlapping task plan. Do not answer the question and do not invent
