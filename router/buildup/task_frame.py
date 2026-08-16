@@ -170,7 +170,9 @@ def _detect_task_type(text: str) -> str:
         return "file_read"
     if re.search(r"가져와|import|복사", t):
         return "file_import"
-    if re.search(r"파일|문서|pdf|논문|readme", t):
+    if re.search(r"파일|문서|pdf|논문|readme", t) and not re.search(
+        r"쓰고\s*싶|쓸\s*(거|래|건데)|작성하고\s*싶|쓰려고|만들고\s*싶", t
+    ):
         return "file_request"
     return "chat" if re.search(r"^(안녕|고마워|thanks|hello|hi)\b", t) else "unknown"
 
