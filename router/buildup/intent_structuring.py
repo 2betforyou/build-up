@@ -82,7 +82,7 @@ _SYSTEM_PROMPT = f"""\
 }}"""
 
 
-def _extract_json(raw: str) -> Optional[Dict[str, Any]]:
+def _extract_json(raw: str, required_key: str = "intent") -> Optional[Dict[str, Any]]:
     """Extract first valid JSON object from LLM output, tolerating think-tags and fences."""
     text = re.sub(r"```\w*\n?", "", raw).strip()
     text = re.sub(
@@ -93,7 +93,7 @@ def _extract_json(raw: str) -> Optional[Dict[str, Any]]:
 
     try:
         parsed = json.loads(text)
-        if isinstance(parsed, dict) and "intent" in parsed:
+        if isinstance(parsed, dict) and required_key in parsed:
             return parsed
     except json.JSONDecodeError:
         pass
@@ -115,11 +115,107 @@ def _extract_json(raw: str) -> Optional[Dict[str, Any]]:
         candidate = text[start:end + 1]
         try:
             parsed = json.loads(candidate)
-            if isinstance(parsed, dict) and "intent" in parsed:
+            if isinstance(parsed, dict) and required_key in parsed:
                 return parsed
         except json.JSONDecodeError:
             pass
         pos = end + 1
+
+
+_RISKY_INTENT_GUIDANCE: Dict[str, str] = {
+    "export": (
+        "사용자가 현재 job 전체를 내보내라고 명시적으로 요청했는가. "
+        "'알아서 해', '네가 판단해서' 같은 막연한 위임 표현은 확인된 요청이 아니다."
+    ),
+    "import": (
+        "사용자가 특정 외부 경로의 파일을 현재 job으로 가져오라고 요청했고, "
+        "그 경로가 텍스트에 실제로 적혀 있는가."
+    ),
+    "trash": (
+        "사용자가 특정 파일을 삭제하거나 휴지통으로 옮기라고 요청했고, "
+        "어떤 파일인지 텍스트에 실제로 적혀 있는가."
+    ),
+    "write": (
+        "사용자가 새 파일을 만들라고 요청했고, 파일 경로와 저장할 내용이 "
+        "텍스트에 실제로 적혀 있는가."
+    ),
+    "rewrite": (
+        "사용자가 기존 파일을 수정하라고 요청했고, 어떤 파일을 어떻게 "
+        "고칠지 텍스트에 실제로 적혀 있는가."
+    ),
+}
+
+
+def verify_risky_intent(
+    intent: str,
+    text: str,
+    session: requests.Session,
+    cfg: BuildupConfig,
+    logger: logging.Logger,
+) -> Optional[Dict[str, Any]]:
+    """Confirm a consequential intent (export/trash/import/write/rewrite) with
+    the small struct model and extract its parameters, instead of trusting
+    embedding cosine-similarity plus a keyword regex.
+
+    A nearest-neighbor label match on a vague sentence ("just handle it
+    yourself") can look like "export" purely by surface similarity to a
+    canned example. The struct model actually reads the sentence and checks
+    whether the required specifics — a path, a filename, content — are
+    really there. Returns None (→ fall through to the full agent) whenever
+    the model isn't confident this is really the action, or a required
+    parameter is missing.
+    """
+    from buildup.ollama import chat
+
+    guidance = _RISKY_INTENT_GUIDANCE.get(intent, "")
+    system = (
+        "당신은 되돌리기 어렵거나 외부에 영향을 주는 작업을 실행하기 전에 "
+        "사용자의 요청을 정확히 확인하는 검증기다. 확신이 없으면 "
+        '"confirmed": false로 답하라.\n\n'
+        f"판단 기준: {guidance}\n\n"
+        "반드시 아래 JSON 스키마 하나만 출력하라. 설명, 코드펜스 금지.\n"
+        '{"confirmed": true 또는 false, "relpath": "경로 또는 null", '
+        '"path": "경로 또는 null", "content": "내용 또는 null", '
+        '"instruction": "지시문 또는 null", "dest": "경로 또는 null"}'
+    )
+    try:
+        raw = chat(
+            session, cfg, cfg.struct_model,
+            [{"role": "system", "content": system},
+             {"role": "user", "content": text}],
+            keep_alive="10m",
+            logger=logger,
+            think=False,
+            json_mode=True,
+        )
+    except Exception as exc:
+        logger.warning("Risky-intent verification LLM call failed: %s", exc)
+        return None
+
+    data = _extract_json(raw, required_key="confirmed")
+    if not data or not data.get("confirmed"):
+        return None
+
+    if intent == "export":
+        return {"dest": data.get("dest") or ""}
+    if intent == "import":
+        path = data.get("path")
+        return {"path": path} if path else None
+    if intent == "trash":
+        relpath = data.get("relpath")
+        return {"relpath": relpath} if relpath else None
+    if intent == "write":
+        relpath = data.get("relpath")
+        if not relpath:
+            return None
+        return {"relpath": relpath, "content": data.get("content") or ""}
+    if intent == "rewrite":
+        relpath = data.get("relpath")
+        instruction = data.get("instruction")
+        if not relpath or not instruction:
+            return None
+        return {"relpath": relpath, "instruction": instruction}
+    return None
 
 
 def structure_intent(

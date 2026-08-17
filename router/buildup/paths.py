@@ -187,7 +187,16 @@ def export_job(job_id: str, cfg: BuildupConfig, dest: Optional[Path] = None) -> 
         # User specified a path: must be inside export/
         target = require_export(dest.resolve(), cfg, context="export_job")
     else:
-        target = cfg.export_dir / job_id
+        # job_id never changes between calls, so a bare job_id target would
+        # collide on every re-export of the same job. Stamp the export
+        # moment instead, so repeat exports each get their own folder; on the
+        # rare second-granularity collision, add a numeric suffix.
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        target = cfg.export_dir / f"{job_id}-{stamp}"
+        suffix = 2
+        while target.exists():
+            target = cfg.export_dir / f"{job_id}-{stamp}-{suffix}"
+            suffix += 1
         # Default path is always valid, but still validate for consistency
         require_export(target, cfg, context="export_job default")
 

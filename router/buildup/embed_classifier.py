@@ -184,6 +184,11 @@ INTENT_EXAMPLES: Dict[str, List[str]] = {
 # Below this threshold → fall through to agent.
 CONFIDENCE_THRESHOLD = 0.75
 
+# Consequential intents: cosine similarity alone is not enough evidence to
+# act on. These are verified by the small struct model instead of a
+# keyword-regex guess — see IntentEmbedClassifier.classify_and_extract.
+_RISKY_INTENTS = {"write", "rewrite", "trash", "import", "export"}
+
 
 # ============================================================
 # Ollama embed API
@@ -249,17 +254,10 @@ def _cosine(a: List[float], b: List[float]) -> float:
 # ============================================================
 
 _FILE_RE = re.compile(r"([\w./-]+\.\w{1,6})")
-_PATH_RE = re.compile(r"(~?/[\w./-]+|[\w.-]+\.\w{1,6})")
 _NOISE_SEARCH = re.compile(
     r"(검색|찾아봐?|알아봐?|search|구글에서?|웹에서?|인터넷에서?)\s*", re.I
 )
 
-# Conditional / multi-step language — signals agent-level complexity
-_COMPLEX_RE = re.compile(
-    r"(만약|이라면|않다면|없다면|있다면|경우에?|조건|먼저|그리고\s*나서|그\s*다음|"
-    r"최상단|최하단|맨\s*위|맨\s*아래|기존[에]?|이미\s*있|이전\s*내용|날짜가\s*없|날짜가\s*있)",
-    re.I,
-)
 # Action words that strongly imply write/modify, not read
 _WRITE_ACTION_RE = re.compile(
     r"(추가해?줘?|덧붙여?줘?|넣어줘?|써줘?|기록해?줘?|저장해?줘?|포함해?줘?)",
@@ -270,21 +268,13 @@ _WRITE_ACTION_RE = re.compile(
 def _should_fallthrough_to_agent(intent: str, text: str) -> bool:
     """Return True when the request is too complex for Tier-1 rule extraction.
 
-    Two cases:
-    1. write/rewrite intent + conditional language (multi-step logic needed)
-    2. "read" classification but text contains write-action words
-       (classifier confused; agent should handle the real intent)
+    Only "read" reaches this check now — write/rewrite/trash/import/export
+    are verified by the struct model instead (see _RISKY_INTENTS), which
+    handles multi-clause and conditional language on its own.
+
+    "read" classification but text contains write-action words
+    (classifier confused; agent should handle the real intent)
     """
-    sentences = [s.strip() for s in re.split(r"[.。！？!?\n,，]", text) if s.strip()]
-
-    if intent in ("write", "rewrite"):
-        # Multi-clause with conditional logic → agent
-        if _COMPLEX_RE.search(text):
-            return True
-        # Multiple sentences with different instructions → agent
-        if len(sentences) >= 3:
-            return True
-
     if intent == "read" and _WRITE_ACTION_RE.search(text):
         # Embed classifier confused a write request for read
         return True
@@ -297,48 +287,22 @@ def _extract_params(
     text: str,
     cfg: BuildupConfig,
 ) -> Optional[Dict[str, Any]]:
-    """Extract structured parameters for a classified intent.
+    """Extract structured parameters for a low-risk, read-only intent.
 
     Returns None if required params cannot be reliably extracted
-    (caller should fall through to agent).
+    (caller should fall through to agent). Consequential intents
+    (export/trash/import/write/rewrite) never reach this function — see
+    ``_RISKY_INTENTS`` and ``intent_structuring.verify_risky_intent``.
     """
     if intent == "read":
         m = _FILE_RE.search(text)
         return {"relpath": m.group(1)} if m else None
-
-    if intent == "write":
-        m = _FILE_RE.search(text)
-        if not m:
-            return None
-        relpath = m.group(1)
-        content_m = re.search(r"[:：]\s*(.+)$", text, re.DOTALL)
-        content = content_m.group(1).strip() if content_m else ""
-        return {"relpath": relpath, "content": content}
-
-    if intent == "rewrite":
-        m = _FILE_RE.search(text)
-        if not m:
-            return None
-        relpath = m.group(1)
-        instruction = re.sub(re.escape(relpath), "", text).strip()
-        return {"relpath": relpath, "instruction": instruction}
 
     if intent == "search":
         query = _NOISE_SEARCH.sub("", text).strip() or text
         return {"query": query}
 
     if intent == "files":
-        return {}
-
-    if intent == "trash":
-        m = _FILE_RE.search(text)
-        return {"relpath": m.group(1)} if m else None
-
-    if intent == "import":
-        m = _PATH_RE.search(text)
-        return {"path": m.group(1)} if m else None
-
-    if intent == "export":
         return {}
 
     if intent == "job_new":
@@ -537,16 +501,30 @@ class IntentEmbedClassifier:
             # the dispatcher re-classify as chat or fall to agent.
             return None
 
-        if _should_fallthrough_to_agent(intent_label, text):
-            logger.debug(
-                "EmbedClassifier: %s intent but request is too complex → agent", intent_label
-            )
-            return None
+        if intent_label in _RISKY_INTENTS:
+            # A nearest-neighbor label match on a vague sentence can look
+            # like "export" or "trash" purely by embedding distance to a
+            # canned example. For consequential actions, have the small
+            # struct model actually read the sentence and confirm it before
+            # trusting the label, instead of a keyword-regex guess.
+            from buildup.intent_structuring import verify_risky_intent
+            params = verify_risky_intent(intent_label, text, self._session, cfg, logger)
+            if params is None:
+                logger.debug(
+                    "EmbedClassifier: struct model did not confirm %s → agent", intent_label
+                )
+                return None
+        else:
+            if _should_fallthrough_to_agent(intent_label, text):
+                logger.debug(
+                    "EmbedClassifier: %s intent but request is too complex → agent", intent_label
+                )
+                return None
 
-        params = _extract_params(intent_label, text, cfg)
-        if params is None:
-            logger.debug("EmbedClassifier: param extraction failed for %s → agent", intent_label)
-            return None
+            params = _extract_params(intent_label, text, cfg)
+            if params is None:
+                logger.debug("EmbedClassifier: param extraction failed for %s → agent", intent_label)
+                return None
 
         return {
             "intent": intent_label,
