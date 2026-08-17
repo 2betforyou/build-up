@@ -113,42 +113,6 @@ INTENT_EXAMPLES: Dict[str, List[str]] = {
         "논문 검색해줘",
         "검색 좀 해줘",
     ],
-    "cal_add": [
-        "내일 오후 3시에 미팅 잡아줘",
-        "다음 주 월요일 10시에 회의 추가해줘",
-        "오늘 오후 2시 랩미팅 등록해줘",
-        "금요일 점심 약속 추가",
-        "일정 새로 잡아줘",
-        "스케줄 추가해줘",
-        "약속 등록해줘",
-        "4월 5일 세미나 넣어줘",
-        "미팅 잡아줘",
-        "일정 추가",
-        "일정 등록해줘",
-    ],
-    "cal_list": [
-        "이번 주 일정 보여줘",
-        "다음 주 스케줄 알려줘",
-        "오늘 일정 뭐야?",
-        "이번 달 일정 확인",
-        "캘린더 보여줘",
-        "내 일정 알려줘",
-        "이번 주 미팅 있어?",
-        "내일 뭐 있어?",
-        "일정 조회",
-        "스케줄 확인해줘",
-        "이번 주 뭐 있어?",
-    ],
-    "cal_delete": [
-        "오늘 미팅 취소해줘",
-        "내일 회의 삭제해줘",
-        "랩미팅 취소",
-        "일정 지워줘",
-        "스케줄 삭제",
-        "약속 취소해줘",
-        "일정 취소",
-        "미팅 삭제해줘",
-    ],
     "trash": [
         "draft.md 삭제해줘",
         "파일 버려줘",
@@ -338,23 +302,6 @@ def _extract_params(
     Returns None if required params cannot be reliably extracted
     (caller should fall through to agent).
     """
-    # Calendar intents: delegate to existing rule functions — they handle
-    # date/time resolution which is too complex to reproduce here.
-    if intent in ("cal_add", "cal_list", "cal_delete", "cal_export", "cal_import"):
-        from buildup.intent import (  # local import to avoid circular
-            _rule_cal_add, _rule_cal_delete, _rule_cal_export,
-            _rule_cal_import, _rule_cal_list,
-        )
-        _CAL_RULES = {
-            "cal_add": _rule_cal_add,
-            "cal_list": _rule_cal_list,
-            "cal_delete": _rule_cal_delete,
-            "cal_export": _rule_cal_export,
-            "cal_import": _rule_cal_import,
-        }
-        result = _CAL_RULES[intent](text, cfg)
-        return result["params"] if result else None
-
     if intent == "read":
         m = _FILE_RE.search(text)
         return {"relpath": m.group(1)} if m else None
@@ -419,11 +366,6 @@ _DESC_MAP: Dict[str, str] = {
     "export":     "Job 내보내기",
     "job_new":    "새 Job 생성",
     "job_use":    "Job 전환",
-    "cal_add":    "일정 추가",
-    "cal_list":   "일정 조회",
-    "cal_delete": "일정 삭제",
-    "cal_export": "캘린더 내보내기",
-    "cal_import": "캘린더 가져오기",
 }
 
 

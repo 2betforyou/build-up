@@ -75,7 +75,7 @@ MAIN_INSTRUCTIONS = """
 
 응답 스타일:
 - 비교, 분석, 설계, 디버깅, 구조화된 판단에 강해야 한다.
-- 사용자의 로컬 CLI 맥락, workspace, jobs, calendar, knowledge base를 고려한다.
+- 사용자의 로컬 CLI 맥락, workspace, jobs, knowledge base를 고려한다.
 - 실행 가능한 것과 불가능한 것을 분리해서 설명한다.
 - 단순 답변보다 근거 있는 판단과 설계 대안을 제공한다.
 

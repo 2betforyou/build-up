@@ -188,13 +188,6 @@ def _fallback_extract_section_from_paper_json(data: Dict[str, Any], section: str
 
 # ── Tool executors ────────────────────────────────────────────
 
-def _exec_calendar_list(params: Dict[str, Any], ctx: ToolContext) -> Tuple[str, Optional[str]]:
-    from buildup.calendar_mgr import cal_list, format_events
-    days = int(params.get("days", 7))
-    events = cal_list(ctx.cfg, upcoming_days=days)
-    return (format_events(events) if events else "(일정 없음)"), None
-
-
 def _exec_list_files(params: Dict[str, Any], ctx: ToolContext) -> Tuple[str, Optional[str]]:
     from buildup.jobs import cmd_files
     jid = _current_job(ctx)
@@ -207,7 +200,7 @@ def _exec_read_file(params: Dict[str, Any], ctx: ToolContext) -> Tuple[str, Opti
     relpath = _relpath(params, ctx)
     jid = _current_job(ctx)
     content = cmd_read(jid, relpath, ctx.cfg)
-    return content[:6000], relpath
+    return content, relpath
 
 
 def _exec_list_paper_files(params: Dict[str, Any], ctx: ToolContext) -> Tuple[str, Optional[str]]:
@@ -461,54 +454,6 @@ def _exec_grep_files(params: Dict[str, Any], ctx: ToolContext) -> Tuple[str, Opt
     return ("\n".join(results[:80]) if results else "(매칭 없음)"), None
 
 
-def _exec_run_shell(params: Dict[str, Any], ctx: ToolContext) -> Tuple[str, Optional[str]]:
-    from buildup.command_runner import UnsafeCommandError, run_command
-    from buildup.jobs import append_action_log
-    from buildup.state import get_current_job, job_dir
-    command = params.get("command", "")
-    if not command:
-        return "[오류] run_shell: command가 비어 있습니다.", None
-    jid = get_current_job(ctx.cfg, required=False)
-    cwd = job_dir(jid, ctx.cfg) if jid else ctx.cfg.base_dir
-    try:
-        completed = run_command(command, cwd, timeout=60)
-        output = completed.output
-        lines = output.splitlines()
-        if len(lines) > 150:
-            lines = [f"(출력 {len(lines)}줄 중 마지막 150줄)"] + lines[-150:]
-            output = "\n".join(lines)
-        if jid:
-            append_action_log(
-                jid, ctx.cfg, "shell",
-                f"exit={completed.returncode} cmd={command[:80]}",
-            )
-        return f"[exit {completed.returncode}]\n{output or '(출력 없음)'}", None
-    except UnsafeCommandError as exc:
-        return f"[차단] {exc}", None
-    except Exception as exc:
-        return f"[오류] {exc}", None
-
-
-def _exec_git_run(params: Dict[str, Any], ctx: ToolContext) -> Tuple[str, Optional[str]]:
-    from buildup.git_mgr import git_run as _git_run, RequiresConfirmation
-    from buildup.jobs import append_action_log
-    from buildup.state import get_current_job, job_dir
-    args = params.get("args", "")
-    if not args:
-        return "[오류] git_run: args가 비어 있습니다.", None
-    jid = get_current_job(ctx.cfg, required=False)
-    cwd = job_dir(jid, ctx.cfg) if jid else ctx.cfg.base_dir
-    try:
-        output, code = _git_run(args, cwd, confirm_destructive=False)
-        if jid:
-            append_action_log(jid, ctx.cfg, "git", f"exit={code} args={args[:80]}")
-        return f"[exit {code}]\n{output or '(출력 없음)'}", None
-    except RequiresConfirmation as exc:
-        return f"[차단] {exc}\n에이전트는 파괴적 git 명령을 실행할 수 없습니다. /git으로 직접 실행하세요.", None
-    except Exception as exc:
-        return f"[오류] git: {exc}", None
-
-
 def _exec_search(params: Dict[str, Any], ctx: ToolContext) -> Tuple[str, Optional[str]]:
     from buildup.search import format_search_results, web_search
     from buildup.prompts import system_search_synthesis, system_main
@@ -720,7 +665,6 @@ def _exec_compare_papers(params: Dict[str, Any], ctx: ToolContext) -> Tuple[str,
 
 # ── Register all tools ────────────────────────────────────────
 
-register(ToolDef("calendar_list",  "앞으로 N일간 일정 목록 반환",         "low",    "safe-readonly",       _exec_calendar_list))
 register(ToolDef("list_files",     "현재 job 파일 목록 반환",              "low",    "safe-readonly",       _exec_list_files))
 register(ToolDef("read_file",      "현재 job 파일 읽기",                   "low",    "safe-local-read",     _exec_read_file))
 register(ToolDef("list_paper_files", "선택한 논문 라이브러리 디렉토리 파일 목록 반환", "low", "safe-readonly", _exec_list_paper_files))
@@ -732,8 +676,6 @@ register(ToolDef("edit_file",      "파일에서 old→new 정밀 교체",      
 register(ToolDef("rewrite_file",   "파일 전체 내용 수정 (새 파일 생성)",   "medium", "safe-local-rewrite",  _exec_rewrite_file))
 register(ToolDef("glob_files",     "glob 패턴으로 파일 검색",              "low",    "safe-readonly",       _exec_glob_files))
 register(ToolDef("grep_files",     "파일 내용 정규식 검색",                "low",    "safe-readonly",       _exec_grep_files))
-register(ToolDef("run_shell",      "승인 후 단일 허용 명령 실행",          "high",   "confirm-shell",       _exec_run_shell))
-register(ToolDef("git_run",        "git 명령 실행 (파괴적 명령 차단)",     "medium", "confirm-git",         _exec_git_run))
 register(ToolDef("search",         "웹 검색 + AI 합성",                    "low",    "safe-search",         _exec_search))
 register(ToolDef("deep_search",    "심층 웹 검색 + 분석 + 파일 저장",     "medium", "safe-search",         _exec_deep_search))
 register(ToolDef("trash_file",     "파일을 휴지통으로 이동",               "medium", "confirm-always",      _exec_trash_file))

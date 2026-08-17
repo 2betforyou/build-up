@@ -301,12 +301,12 @@ def run_doctor(cfg: BuildupConfig, session: Any) -> DoctorReport:
     ))
 
     skill_names = {skill.name for skill in load_skills(cfg, refresh=True)}
-    required_skills = {"deep-research", "personal-study-coach", "paper-pdf-translation"}
+    required_skills = {"deep-research", "paper-pdf-translation"}
     missing_skills = sorted(required_skills - skill_names)
     checks.append(DoctorCheck(
         "build-up skills",
         "PASS" if not missing_skills else "FAIL",
-        "3 core skills found"
+        "2 core skills found"
         if not missing_skills
         else "missing: " + ", ".join(missing_skills) + " · run: buildup skills reindex",
     ))

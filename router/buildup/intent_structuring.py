@@ -41,7 +41,6 @@ document_write    - 문서 작성
 experiment_run    - 실험/스크립트 실행
 debug             - 버그 찾기/수정
 workflow_multi_step - 여러 단계가 필요한 복합 작업
-calendar          - 일정 관리
 file_manage       - 파일 관리 (읽기/쓰기/검색)"""
 
 _MODE_ENUMS = """\

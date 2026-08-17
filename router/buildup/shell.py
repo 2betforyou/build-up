@@ -15,22 +15,7 @@ from rich.table import Table
 from rich.text import Text
 
 from buildup import PRODUCT_NAME
-from buildup.calendar_mgr import (
-    cal_add,
-    cal_delete,
-    cal_export_ics,
-    cal_import_ics,
-    cal_list,
-    cal_today,
-    format_events,
-)
 from buildup.config import BuildupConfig
-from buildup.command_runner import (
-    ALLOWED_COMMANDS,
-    UnsafeCommandError,
-    parse_command,
-    run_command,
-)
 from buildup.conversation import ConversationHistory
 from buildup.deep_research import (
     evaluate_research_run,
@@ -64,7 +49,6 @@ from buildup.conversation_memory import (
     memory_markdown_path,
 )
 from buildup.agent import run_agent
-from buildup.git_mgr import RequiresConfirmation, git_run
 from buildup.interactive import pick_one
 from buildup.jobs import (
     append_action_log,
@@ -117,7 +101,6 @@ from buildup.paper_library import (
 )
 from buildup.paper_translation import resolve_translation_target, translate_paper_pdf
 from buildup.ollama import answer_query_stream, chat, chat_stream, check_ollama, rewrite_file
-from buildup.openwebui import ask_openwebui_with_kb, extract_chat_completion_text, sync_job_to_openwebui
 from buildup.paths import (
     compute_diff,
     ensure_within,
@@ -176,18 +159,6 @@ from buildup.session_store import (
     workspace_key_for,
     workspace_label,
 )
-from buildup.study import (
-    append_study_note,
-    close_study,
-    complete_study_review,
-    due_studies,
-    format_study_list,
-    list_studies,
-    load_study,
-    resolve_study,
-    start_study,
-    study_context,
-)
 from buildup.steering import (
     SteeringState,
     add_directive,
@@ -202,16 +173,14 @@ from buildup.steering import (
 
 RESEARCH_PAPER_READER_CONTEXT = """\
 [build-up assistant mode: research_first]
-build-up is a source-grounded deep-research agent first and a personal study coach
-second. Papers, PDFs, and arXiv links are primary research sources.
+build-up is a source-grounded deep-research agent. Papers, PDFs, and arXiv links
+are primary research sources.
 
 Operational rules:
 - For an explicit deep-research request, use the deep_research workflow. Preserve
   the one-inference contract and never claim its stages are independent model sessions.
 - Keep sources, atomic notes, critical synthesis, citation audit, and final report
   as separate artifacts. Never invent a source or unsupported citation.
-- When a study session is active, follow its Socratic rules and let the learner
-  attempt an explanation before completing it for them.
 - Resolve ambiguous "this paper / abstract / summarize / translate / explain"
   requests against the active paper whenever one is selected.
 - For arXiv URLs, arXiv IDs, PDF URLs, or new paper files, prefer
@@ -236,11 +205,10 @@ The user activated Daytime/Day Mode. In this mode, behave like a practical
 personal assistant for everyday local tasks.
 
 Operational rules:
-- Prioritize calendars, files, notes, project organization, search, lightweight
-  summaries, coding chores, and general Q&A.
+- Prioritize files, notes, project organization, search, lightweight
+  summaries, and general Q&A.
 - Keep answers concise and action-oriented unless the user asks for depth.
-- Use the normal build-up safety checks before writes, shell commands, git, or
-  external actions.
+- Use the normal build-up safety checks before writes or external actions.
 - For paper/PDF requests, still use paper tools when clearly requested, but do
   not over-expand ordinary tasks into deep research reviews.
 - When the user asks for an action, distinguish what build-up actually did from
@@ -363,12 +331,8 @@ def setup_readline(cfg: BuildupConfig) -> None:
         "/search ", "/research ", "/research --no-wiki ", "/research list", "/research show ", "/translate ",
         "/wiki status", "/wiki add", "/wiki ask ", "/wiki review", "/wiki lint",
         "/wiki verify ", "/wiki reject ", "/wiki rollback ", "/wiki bind ",
-        "/study start ", "/study list", "/study use ", "/study note ",
-        "/study status", "/study close ", "/study review", "/study review done", "/study verify ",
-        "/cal add ", "/cal list", "/cal today", "/cal delete ", "/cal export", "/cal import ",
-        "/owui sync ", "/owui ask ",
         "/mode auto", "/mode fast", "/mode main", "/mode refine",
-        "/shell ", "/git ", "/edit ", "/glob ", "/grep ",
+        "/edit ", "/glob ", "/grep ",
         "/session", "/session list", "/session new",
         "/session load ", "/session archive ", "/session export ", "/session info",
         "/session rename ", "/session search ",
@@ -443,7 +407,6 @@ class InteractiveShell:
         self.assistant_mode = "research"
         self.paper_reviewer_mode = False
         self.active_paper_id: Optional[str] = None
-        self.active_study_id: Optional[str] = None
         self._last_wiki_claim_ids: List[str] = []
         # Last blocking file clarification.  Keep the exact TaskFrame so the
         # user's next reply can select from the candidates that were shown.
@@ -499,12 +462,7 @@ class InteractiveShell:
             "/research": self._cmd_research,
             "/wiki": self._cmd_wiki,
             "/translate": self._cmd_translate,
-            "/study": self._cmd_study,
-            "/cal": self._cmd_cal,
-            "/owui": self._cmd_owui,
             "/sandbox": self._cmd_sandbox,
-            "/shell": self._cmd_shell,
-            "/git": self._cmd_git,
             "/edit": self._cmd_edit_file,
             "/glob": self._cmd_glob,
             "/grep": self._cmd_grep,
@@ -527,10 +485,6 @@ class InteractiveShell:
         if self.assistant_mode != "research":
             current_job = self.current_job
             return job_display_name(current_job, self.cfg) if current_job else None
-        if self.active_study_id and self._session_job_id:
-            study = load_study(self.active_study_id, self._session_job_id, self.cfg)
-            if study:
-                return f"study: {study.topic}"
         if not self.active_paper_id:
             return job_display_name(self._session_job_id, self.cfg) if self._session_job_id else "research"
         entry = find_paper_entry(self.cfg, self.active_paper_id)
@@ -672,11 +626,6 @@ class InteractiveShell:
         # Frozen at session start/resume so another session cannot mutate the
         # current prompt prefix midway through a conversation.
         durable_memory = self._memory_snapshot
-        active_study = ""
-        if self.active_study_id and self._session_job_id:
-            info = load_study(self.active_study_id, self._session_job_id, self.cfg)
-            if info:
-                active_study = study_context(info, self.cfg)
         english_brief_rule = (
             "\n- Prefer Korean first, then a compact English Brief unless the"
             " user requests a single language."
@@ -691,8 +640,6 @@ class InteractiveShell:
                 context += "\n\n" + active_paper_context(self.cfg, self.active_paper_id)
             if durable_memory:
                 context += "\n\n" + durable_memory
-            if active_study:
-                context += "\n\n" + active_study
             if self.paper_reviewer_mode:
                 context += (
                     "\n[build-up reviewer mode]\n"
@@ -706,8 +653,6 @@ class InteractiveShell:
         context = DAYTIME_ASSISTANT_CONTEXT + english_brief_rule + (
             "\n\n" + durable_memory if durable_memory else ""
         )
-        if active_study:
-            context += "\n\n" + active_study
         return context + ("\n\n" + steering if steering else "")
 
     def _handle_assistant_mode_toggle(self, user_input: str) -> bool:
@@ -852,24 +797,6 @@ class InteractiveShell:
             return True
         return False
 
-    def _handle_study_shortcut(self, user_input: str) -> bool:
-        text = re.sub(r"\s+", " ", user_input.strip())
-        lowered = text.lower()
-        if lowered in {"공부 목록", "학습 목록", "study list"}:
-            self._cmd_study("/study list")
-            return True
-        if lowered in {"공부 이어서", "학습 이어서", "study resume"}:
-            self._cmd_study("/study use latest")
-            return True
-        if lowered in {"복습 목록", "오늘 복습", "study review"}:
-            self._cmd_study("/study review")
-            return True
-        match = re.fullmatch(r"(.+?)(?:를|을)?\s*(?:공부|학습)\s*시작(?:해줘|하자|할래)?", text)
-        if match and match.group(1).strip():
-            self._cmd_study(f"/study start {match.group(1).strip()}")
-            return True
-        return False
-
     def _handle_wiki_shortcut(self, user_input: str) -> bool:
         """Route common Korean knowledge requests without an LLM call."""
         text = re.sub(r"\s+", " ", user_input.strip())
@@ -945,7 +872,7 @@ class InteractiveShell:
         # ── Resume only inside the current workspace ──────────────────────
         restored_session: Optional[SessionInfo] = None
         last = load_latest_session(self.cfg, workspace_key=self._workspace_key)
-        if last and (last.messages or last.active_study_id) and self._acquire_session_lease(last.session_id):
+        if last and last.messages and self._acquire_session_lease(last.session_id):
             self._restore_session(last)
             mark_session_status(last.session_id, "active", self.cfg)
             restored_session = last
@@ -1004,12 +931,10 @@ class InteractiveShell:
                     continue
                 if self._handle_wiki_shortcut(user_input):
                     continue
-                if self._handle_study_shortcut(user_input):
-                    continue
                 self._dispatch(user_input)
         finally:
             self._save_session_state()
-            if self.history.turn_count or self._session_kind != "conversation" or self.active_study_id:
+            if self.history.turn_count or self._session_kind != "conversation":
                 mark_session_status(self._session_id, "ended", self.cfg)
             self._release_session_lease()
 
@@ -1150,8 +1075,17 @@ class InteractiveShell:
                 render_info("Job", msg)
 
             elif name == "job_use":
-                cmd_job_use(params.get("job_id", ""), self.cfg)
-                render_info("Job", f"→ {params.get('job_id')}")
+                jid = params.get("job_id", "")
+                if not jid:
+                    jid = self._interactive_job_pick()
+                    if jid is None:
+                        return
+                cmd_job_use(jid, self.cfg)
+                self._start_new_session(job_id=jid, announce=False)
+                render_info("Job", f"→ {jid}")
+
+            elif name == "session_resume":
+                self._interactive_resume()
 
             elif name == "import":
                 dst, _used_job = cmd_import(params.get("path", ""), self.current_job, self.cfg)
@@ -1224,44 +1158,6 @@ class InteractiveShell:
                 source = params.get("source", "")
                 self._cmd_translate(f"/translate {source}".rstrip())
 
-            elif name == "cal_add":
-                ev = cal_add(
-                    title=params.get("title", ""),
-                    date_str=params.get("date", ""),
-                    time_str=params.get("time"),
-                    duration_min=int(params.get("duration_min", 60)),
-                    note=params.get("note", ""),
-                    cfg=self.cfg,
-                )
-                render_info("Calendar", f"Event added: {ev['title']} ({ev['date']} {ev.get('time','')})")
-
-            elif name == "cal_list":
-                if params.get("date_from") or params.get("date_to"):
-                    events = cal_list(self.cfg, date_from=params.get("date_from"), date_to=params.get("date_to"))
-                else:
-                    events = cal_list(self.cfg, upcoming_days=7)
-                render_info("Calendar", format_events(events), "cyan")
-
-            elif name == "cal_today":
-                events = cal_today(self.cfg)
-                render_info("Today", format_events(events), "cyan")
-
-            elif name == "cal_delete":
-                removed = cal_delete(params.get("event_id", ""), self.cfg)
-                if removed:
-                    render_info("Calendar", f"Deleted: {removed['title']}")
-                else:
-                    render_info("Calendar", "Event not found.", "yellow")
-
-            elif name == "cal_export_ics":
-                ics_path = cal_export_ics(self.cfg)
-                render_info("Calendar", f"ICS exported\n{ics_path}")
-
-            elif name == "cal_import_ics":
-                path = resolve_path(params.get("path", ""))
-                count = cal_import_ics(path, self.cfg)
-                render_info("Calendar", f"{count} event(s) imported")
-
             else:
                 render_info("Error", f"Unknown intent: {name}", "red")
 
@@ -1309,85 +1205,7 @@ class InteractiveShell:
                 render_info("Error", f"[Step {i+1}] {exc}\nAborting remaining steps.", "red")
                 return
 
-    # --- New command handlers: shell, git, edit, glob, grep ---
-
-    _ALLOWED_COMMANDS = ALLOWED_COMMANDS
-
-    def _shell_safe(self, cmd: str) -> None:
-        """Validate that *cmd* is one direct allowlisted process."""
-        parse_command(cmd, allowed_commands=self._ALLOWED_COMMANDS)
-
-    def _cmd_shell(self, user_input: str) -> None:
-        """/shell CMD — run a shell command in the current job directory."""
-        cmd = user_input[len("/shell"):].strip()
-        if not cmd:
-            render_info("Shell", "Usage: /shell CMD\nExample: /shell ls -la", "yellow")
-            return
-
-        try:
-            self._shell_safe(cmd)
-        except UnsafeCommandError as exc:
-            render_info("Shell Blocked", str(exc), "red")
-            return
-
-        jid = get_current_job(self.cfg, required=False)
-        cwd = job_dir(jid, self.cfg) if jid else self.cfg.base_dir
-        render_info("Shell", f"$ {cmd}", "dim")
-        try:
-            completed = run_command(cmd, cwd, timeout=60)
-            output = completed.output
-            lines = output.splitlines()
-            if len(lines) > 200:
-                lines = [f"(output truncated to last 200 of {len(lines)} lines)"] + lines[-200:]
-                output = "\n".join(lines)
-            style = "green" if completed.returncode == 0 else "red"
-            title = f"Shell [exit {completed.returncode}]"
-            render_info(title, output or "(no output)", style)
-            if jid:
-                append_action_log(
-                    jid, self.cfg, "shell",
-                    f"exit={completed.returncode} cmd={cmd[:80]}"
-                )
-        except Exception as exc:
-            render_info("Shell Error", str(exc), "red")
-
-    def _cmd_git(self, user_input: str) -> None:
-        """/git ARGS — run a git command in the current job directory."""
-        args = user_input[len("/git"):].strip()
-        if not args:
-            render_info("Git", "Usage: /git ARGS\nExample: /git status", "yellow")
-            return
-
-        jid = get_current_job(self.cfg, required=False)
-        cwd = self.cfg.workspace_dir / jid if jid else self.cfg.base_dir
-
-        try:
-            output, code = git_run(args, cwd, confirm_destructive=False)
-        except RequiresConfirmation as exc:
-            console.print(Panel(
-                f"[bold yellow]{exc}[/bold yellow]\n\nProceed? (y/n)",
-                title="Git Confirm", border_style="yellow",
-            ))
-            try:
-                ans = input().strip().lower()
-            except (EOFError, KeyboardInterrupt):
-                ans = "n"
-            if ans not in ("y", "yes"):
-                render_info("Git", "Cancelled", "yellow")
-                return
-            try:
-                output, code = git_run(args, cwd, confirm_destructive=True)
-            except Exception as exc2:
-                render_info("Git Error", str(exc2), "red")
-                return
-        except Exception as exc:
-            render_info("Git Error", str(exc), "red")
-            return
-
-        style = "green" if code == 0 else "red"
-        render_info(f"Git [exit {code}]", output or "(no output)", style)
-        if jid:
-            append_action_log(jid, self.cfg, "git", f"exit={code} args={args[:80]}")
+    # --- New command handlers: edit, glob, grep ---
 
     def _cmd_edit_file(self, user_input: str) -> None:
         """/edit RELPATH :: old_string :: new_string"""
@@ -2073,70 +1891,6 @@ class InteractiveShell:
             return
         render_info(f"History ({self.history.turn_count} turns)", text, "magenta")
 
-    def _cmd_cal(self, user_input: str) -> None:
-        parts = user_input.split()
-        sub = parts[1] if len(parts) > 1 else ""
-
-        if sub == "add":
-            rest = parts[2:]
-            if len(rest) < 2:
-                raise ValueError("Usage: /cal add YYYY-MM-DD [HH:MM] title [-- note]")
-            date_str = rest[0]
-            idx = 1
-            time_str = None
-            if idx < len(rest) and re.match(r"^\d{1,2}:\d{2}$", rest[idx]):
-                time_str = rest[idx]
-                idx += 1
-            remaining = " ".join(rest[idx:])
-            if " -- " in remaining:
-                title, note = remaining.split(" -- ", 1)
-            else:
-                title, note = remaining, ""
-            if not title:
-                raise ValueError("Event title is required.")
-            ev = cal_add(title.strip(), date_str, time_str, 60, note.strip(), self.cfg)
-            render_info("Calendar", f"Added: {ev['title']}  📅 {ev['date']} {ev.get('time','all-day')}  [{ev['id']}]")
-
-        elif sub == "list":
-            rest = parts[2:]
-            if len(rest) == 2:
-                events = cal_list(self.cfg, date_from=rest[0], date_to=rest[1])
-            elif len(rest) == 1 and rest[0].isdigit():
-                events = cal_list(self.cfg, upcoming_days=int(rest[0]))
-            else:
-                events = cal_list(self.cfg, upcoming_days=7)
-            render_info("Calendar", format_events(events), "cyan")
-
-        elif sub == "today":
-            events = cal_today(self.cfg)
-            render_info("Today", format_events(events), "cyan")
-
-        elif sub == "delete":
-            if len(parts) < 3:
-                raise ValueError("Usage: /cal delete EVENT_ID")
-            event_id = parts[2].strip()
-            removed = cal_delete(event_id, self.cfg)
-            if removed:
-                render_info("Calendar", f"Deleted: {removed['title']} ({removed['date']})")
-            else:
-                render_info("Calendar", f"No event found with ID '{event_id}'", "yellow")
-
-        elif sub == "export":
-            ics_path = cal_export_ics(self.cfg)
-            render_info("Calendar", f"ICS exported\n{ics_path}\n\nOpen this file in Apple Calendar to import.")
-
-        elif sub == "import":
-            if len(parts) < 3:
-                raise ValueError("Usage: /cal import PATH.ics")
-            ics_path = resolve_path(parts[2].strip())
-            if not ics_path.exists():
-                raise ValueError(f"File not found: {ics_path}")
-            count = cal_import_ics(ics_path, self.cfg)
-            render_info("Calendar", f"{count} event(s) imported")
-
-        else:
-            render_info("Error", "Subcommands: add / list / today / delete / export / import", "red")
-
     def _cmd_search(self, user_input: str) -> None:
         """Enhanced search: bilingual + deep synthesis with main model."""
         parts = user_input.split(maxsplit=1)
@@ -2540,190 +2294,6 @@ class InteractiveShell:
             "green",
         )
 
-    def _cmd_study(self, user_input: str) -> None:
-        """Manage a project-scoped Socratic study session."""
-        body = user_input[len("/study"):].strip()
-        parts = body.split(maxsplit=1)
-        sub = parts[0].lower() if parts else "status"
-        rest = parts[1].strip() if len(parts) > 1 else ""
-
-        if sub in {"start", "new", "시작"}:
-            if not rest:
-                render_info("Study", "Usage: /study start 공부할 주제", "yellow")
-                return
-            jid = self.current_job
-            if not jid:
-                jid, _ = cmd_job_new(f"study-{rest[:24]}", self.cfg, "study")
-            latest = latest_completed_research_run(jid, self.cfg)
-            source = resolve_path(str(latest["run_dir"])) if latest else None
-            # Study gets its own transcript while retaining a durable pointer
-            # to the completed research artifacts.
-            self._start_new_session(job_id=jid, announce=False)
-            self._session_kind = "study"
-            info = start_study(rest, jid, self.cfg, source_research=source)
-            self.active_study_id = info.study_id
-            self._pending_session_title = f"Study · {rest[:71]}"
-            self._save_session_state()
-            append_action_log(jid, self.cfg, "study_start", info.study_id)
-            render_info(
-                "Study Started",
-                f"{info.topic}\n{info.path}\nnext: {info.next_action}\nreview: {', '.join(info.review_dates)}",
-                "green",
-            )
-            return
-
-        jid = get_current_job(self.cfg, required=True)
-        if sub in {"list", "ls", "목록"}:
-            render_info("Studies", format_study_list(list_studies(jid, self.cfg)), "cyan")
-            return
-        if sub in {"use", "resume", "이어", "열기"}:
-            info = resolve_study(rest or "latest", jid, self.cfg)
-            if not info:
-                render_info("Study", f"공부 세션을 찾지 못했어: {rest}", "yellow")
-                return
-            if self._session_kind != "study" or self.active_study_id != info.study_id:
-                self._start_new_session(job_id=jid, announce=False)
-                self._session_kind = "study"
-                self.active_study_id = info.study_id
-                self._pending_session_title = f"Study · {info.topic[:71]}"
-                self._save_session_state()
-            render_info("Active Study", f"{info.topic}\nnext: {info.next_action}\n{info.path}", "green")
-            return
-        if sub in {"note", "기록"}:
-            if not self.active_study_id:
-                render_info("Study", "먼저 `/study start 주제` 또는 `/study use 번호`를 실행해줘.", "yellow")
-                return
-            info = load_study(self.active_study_id, jid, self.cfg)
-            if not info:
-                raise ValueError("활성 공부 세션의 파일을 찾지 못했습니다.")
-            updated = append_study_note(info, rest, self.cfg)
-            append_action_log(jid, self.cfg, "study_note", updated.study_id)
-            render_info("Verified Note", f"저장했어. verified notes: {updated.verified_notes_count}\nnext: {updated.next_action}", "green")
-            return
-        if sub in {"verify", "claim-verify", "지식확인"}:
-            if not self.active_study_id:
-                render_info(
-                    "Study",
-                    "Study 검증 승격은 활성 공부 세션 안에서만 가능합니다. "
-                    "먼저 `/study use 번호`를 실행해줘.",
-                    "yellow",
-                )
-                return
-            claim_id, _, reason = rest.partition(" ")
-            if not claim_id:
-                render_info("Study", "Usage: /study verify CLAIM_ID [reason]", "yellow")
-                return
-            info = load_study(self.active_study_id, jid, self.cfg)
-            if not info:
-                raise ValueError("활성 공부 세션의 파일을 찾지 못했습니다.")
-            claim = verify_claim(
-                claim_id.upper(),
-                jid,
-                self.cfg,
-                reason=reason or "learner directly explained and checked this claim",
-                via=f"study:{info.study_id}",
-            )
-            append_action_log(jid, self.cfg, "study_verify_claim", claim["claim_id"])
-            render_info(
-                "Study → Knowledge Verified",
-                f"{claim['claim_id']}\n{escape(str(claim['text']))}",
-                "green",
-            )
-            return
-        if sub in {"close", "end", "종료"}:
-            if not self.active_study_id:
-                render_info("Study", "활성 공부 세션이 없어.", "yellow")
-                return
-            info = load_study(self.active_study_id, jid, self.cfg)
-            if not info:
-                raise ValueError("활성 공부 세션의 파일을 찾지 못했습니다.")
-            closed = close_study(info, self.cfg, rest)
-            append_action_log(jid, self.cfg, "study_close", closed.study_id)
-            self.active_study_id = None
-            self._save_session_state()
-            render_info("Study Closed", f"{closed.topic}\nnext: {closed.next_action}", "green")
-            return
-        if sub in {"review", "복습"}:
-            if rest.lower() in {"done", "complete", "완료"}:
-                if not self.active_study_id:
-                    render_info("Study Review", "먼저 `/study review 번호`로 복습할 주제를 열어줘.", "yellow")
-                    return
-                info = load_study(self.active_study_id, jid, self.cfg)
-                if not info:
-                    raise ValueError("활성 공부 세션의 파일을 찾지 못했습니다.")
-                updated, review_date = complete_study_review(info, self.cfg)
-                append_action_log(jid, self.cfg, "study_review", f"{updated.study_id}:{review_date}")
-                render_info(
-                    "Study Review",
-                    f"{review_date} 회차 완료 · {updated.topic}\nnext: {updated.next_action}",
-                    "green",
-                )
-                return
-            if rest:
-                info = resolve_study(rest, jid, self.cfg)
-                if not info:
-                    render_info("Study Review", f"공부 세션을 찾지 못했어: {rest}", "yellow")
-                    return
-                self._start_new_session(job_id=jid, announce=False)
-                self._session_kind = "study"
-                self.active_study_id = info.study_id
-                self._pending_session_title = f"Review · {info.topic[:70]}"
-                self._save_session_state()
-                render_info(
-                    "Study Review",
-                    f"{info.topic}\n노트를 열기 전에 핵심 개념을 자료 없이 설명해줘.\n"
-                    "설명·예제·한계를 확인한 뒤 `/study review done`으로 마쳐.",
-                    "cyan",
-                )
-                return
-            render_info("Due Reviews", format_study_list(due_studies(jid, self.cfg)), "cyan")
-            return
-
-        info = load_study(self.active_study_id, jid, self.cfg) if self.active_study_id else None
-        if info:
-            render_info(
-                "Active Study",
-                f"{info.topic} · {info.status}\nverified: {info.verified_notes_count}\n"
-                f"next: {info.next_action}\n{info.path}",
-                "cyan",
-            )
-        else:
-            render_info(
-                "Study",
-                "활성 공부 세션이 없어. `/study start 주제`로 시작하거나 `/study list`를 확인해줘.",
-                "yellow",
-            )
-
-
-    def _cmd_owui(self, user_input: str) -> None:
-        parts = user_input.split(maxsplit=2)
-        sub = parts[1] if len(parts) > 1 else ""
-
-        if sub == "sync":
-            jid = get_current_job(self.cfg, required=True)
-            if len(parts) < 3:
-                raise ValueError("Usage: /owui sync KBKEY")
-            kb_key = parts[2].strip().lower()
-            synced = sync_job_to_openwebui(jid, kb_key, self.session, self.cfg)
-            body = "\n".join(f"{rel} -> {fid}" for rel, fid in synced) or "(no files)"
-            append_action_log(jid, self.cfg, "owui_sync", kb_key)
-            render_info("Open WebUI Sync", body)
-        elif sub == "ask":
-            payload = user_input[len("/owui ask "):]
-            if " :: " not in payload:
-                raise ValueError("Usage: /owui ask KBKEY :: question")
-            kb_key, question = payload.split(" :: ", 1)
-            kb_key = kb_key.strip().lower()
-            kb_id = self.cfg.openwebui_kb_map.get(kb_key, "")
-            if not kb_id:
-                raise ValueError(f"Environment variable OPENWEBUI_KB_{kb_key.upper()} is not set.")
-            # KB Q&A requires deep reasoning — always use main model
-            resp = ask_openwebui_with_kb(question.strip(), self.cfg.main_model, kb_id, self.session, self.cfg)
-            text = extract_chat_completion_text(resp.json())
-            render_answer(text, f"Open WebUI KB:{kb_key}", self.mode)
-        else:
-            render_info("Error", "Subcommands: sync / ask", "red")
-
     def _cmd_sandbox(self, _: str) -> None:
         """Display the current sandbox policy."""
         from buildup.sandbox import describe_policy
@@ -2748,7 +2318,6 @@ class InteractiveShell:
             steering_directives=self.steering.directives,
             workspace_key=self._workspace_key,
             context_summary=self.history.context_summary,
-            active_study_id=self.active_study_id,
             kind=self._session_kind,
             model_config={
                 "fast": self.cfg.fast_model,
@@ -2756,9 +2325,9 @@ class InteractiveShell:
                 "research": self.cfg.research_model,
                 "reviewer": self.cfg.reviewer_model,
             },
-            persist_empty=self._session_kind != "conversation" or bool(self.active_study_id),
+            persist_empty=self._session_kind != "conversation",
         )
-        if (messages or self._session_kind != "conversation" or self.active_study_id) and self._pending_session_title:
+        if (messages or self._session_kind != "conversation") and self._pending_session_title:
             if rename_session(self._session_id, self._pending_session_title, self.cfg):
                 self._pending_session_title = ""
 
@@ -2805,11 +2374,6 @@ class InteractiveShell:
         self.active_paper_id = info.active_paper_id
         if self.active_paper_id and not find_paper_entry(self.cfg, self.active_paper_id):
             self.active_paper_id = None
-        self.active_study_id = info.active_study_id
-        if self.active_study_id and (
-            not info.job_id or not load_study(self.active_study_id, info.job_id, self.cfg)
-        ):
-            self.active_study_id = None
 
         self.steering = SteeringState()
         try:
@@ -2876,7 +2440,7 @@ class InteractiveShell:
             return
         previous_id = self._session_id
         self._save_session_state()
-        if self.history.turn_count or self._session_kind != "conversation" or self.active_study_id:
+        if self.history.turn_count or self._session_kind != "conversation":
             mark_session_status(previous_id, "ended", self.cfg)
         self._release_session_lease()
         self._session_lease = target_lease
@@ -2920,7 +2484,7 @@ class InteractiveShell:
     def _start_new_session(self, *, job_id: Optional[str] = None, announce: bool = True) -> None:
         previous_id = self._session_id
         self._save_session_state()
-        if self.history.turn_count or self._session_kind != "conversation" or self.active_study_id:
+        if self.history.turn_count or self._session_kind != "conversation":
             mark_session_status(previous_id, "ended", self.cfg)
         self._release_session_lease()
         self._session_id = new_session_id()
@@ -2934,7 +2498,6 @@ class InteractiveShell:
         self.assistant_mode = "research"
         self.paper_reviewer_mode = False
         self.active_paper_id = None
-        self.active_study_id = None
         self.steering = SteeringState()
         self._apply_steering()
         self._last_memory_signature = ""

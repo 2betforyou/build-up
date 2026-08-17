@@ -188,33 +188,6 @@ class SessionUxTests(unittest.TestCase):
             self.assertEqual("default", shell.steering.profile)
             shell._release_session_lease()
 
-    def test_study_starts_in_a_new_session_but_keeps_the_same_job(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            cfg = BuildupConfig(base_dir=Path(temp_dir))
-            job_id, _ = cmd_job_new("research-to-study", cfg, "research")
-            shell = InteractiveShell(cfg, object(), logging.getLogger("test-study-isolation"))
-            shell._acquire_session_lease(shell._session_id)
-            shell._session_kind = "research"
-            shell.history.load_messages([
-                {"role": "user", "content": "research question"},
-                {"role": "assistant", "content": "research answer"},
-            ])
-            research_session_id = shell._session_id
-
-            with patch("buildup.shell.render_info"):
-                shell._cmd_study("/study start attention mechanisms")
-
-            self.assertNotEqual(research_session_id, shell._session_id)
-            self.assertEqual(job_id, shell._session_job_id)
-            self.assertEqual("study", shell._session_kind)
-            self.assertEqual(0, shell.history.turn_count)
-            self.assertIsNotNone(shell.active_study_id)
-            sessions = list_sessions(cfg, workspace_key=f"job:{job_id}")
-            self.assertEqual({"research", "study"}, {info.kind for info in sessions})
-            study_session = next(info for info in sessions if info.kind == "study")
-            self.assertEqual(shell.active_study_id, study_session.active_study_id)
-            shell._release_session_lease()
-
     def test_retry_does_not_remove_a_research_workflow(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             shell = InteractiveShell(

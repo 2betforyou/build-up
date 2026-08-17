@@ -69,13 +69,11 @@ Knowledge ingestion may read only a completed research run whose citation audit,
 |---|---|
 | `cli.py` | argparse and one-shot routing |
 | `shell.py` | interactive session lifecycle and commands |
-| `study.py` | Socratic study state and spaced review |
 | `session_store.py` | SQLite schema, FTS, migration, export, process lease |
 | `conversation.py` | durable transcript and bounded prompt context |
 | `paper*.py` | paper library, extraction, memory, review, translation |
 | `state_machine.py` / `agent.py` / `tool_registry.py` | constrained planning, guarded tools, bounded ReAct fallback |
 | `sandbox.py` / `permission.py` | job/library/knowledge path gates and action policy |
-| `command_runner.py` / `git_mgr.py` | approved direct-process and restricted Git execution |
 | `skills.py` | packaged and local Agent Skill discovery |
 | `doctor.py` | runtime, model, storage, search, and skill readiness |
 

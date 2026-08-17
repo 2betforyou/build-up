@@ -150,16 +150,8 @@ def _detect_task_type(text: str) -> str:
         return "paper_translation"
     if re.search(r"arxiv\.org/(abs|pdf)/|arxiv\s*:?\s*\d{4}\.\d{4,5}|https?://\S+\.pdf", t):
         return "paper_review"
-    if re.search(r"일정|스케줄|미팅|회의|약속|calendar|schedule", t):
-        if re.search(r"추가|잡아|넣어|등록|삭제|지워|import|export|add|delete", t):
-            return "calendar_mutation"
-        return "calendar_query"
     if re.search(r"검색|찾아봐|웹|구글|search|research", t):
         return "web_research" if re.search(r"정리|분석|보고서|리포트|저장", t) else "search"
-    if re.search(r"쉘|터미널|명령|실행|shell|terminal|run command", t):
-        return "shell"
-    if re.search(r"\bgit\b|커밋|브랜치|diff|status", t):
-        return "git"
     if re.search(r"(파일|문서).*(목록|리스트|list)|\bfiles\b|list\s+files", t):
         return "file_list"
     if re.search(r"요약|정리|summar", t):
@@ -269,12 +261,6 @@ def _resolve_targets(text: str, current_job: Optional[str], cfg: BuildupConfig) 
 def _risk_for(task_type: str, text: str) -> str:
     if task_type == "paper_review":
         return "local_write"
-    if task_type in {"calendar_mutation"}:
-        return "calendar_write"
-    if task_type in {"shell"}:
-        return "shell_exec"
-    if task_type in {"git"}:
-        return "git"
     if task_type in {"file_rewrite", "file_import"}:
         return "local_write"
     if task_type == "file_summarize" and re.search(r"저장|작성|파일로|save|write", text, re.I):
@@ -304,8 +290,6 @@ def _steps_for(task_type: str, targets: List[TargetCandidate]) -> List[str]:
         return ["웹 원문 수집", "단일 호출 역할별 연구", "격리된 결과 파일 저장"]
     if task_type == "paper_translation":
         return ["PDF 페이지 추출", "번역과 핵심 의미 분리", "한국어 Markdown 저장"]
-    if task_type == "calendar_mutation":
-        return ["날짜/시간/제목 확인", "일정 변경"]
     return []
 
 
@@ -377,8 +361,7 @@ def _looks_like_active_paper_request(frame: TaskFrame) -> bool:
     """Return True when a research-mode utterance should bind to active paper."""
     text = frame.raw_input.lower()
     if frame.task_type in {
-        "calendar_query", "calendar_mutation", "search", "web_research",
-        "shell", "git", "file_import", "file_rewrite",
+        "search", "web_research", "file_import", "file_rewrite",
     }:
         return False
     if re.search(r"논문|paper|arxiv|pdf|리뷰|review|method|방법론|실험|저자", text, re.I):

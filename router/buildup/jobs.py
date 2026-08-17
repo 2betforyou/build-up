@@ -259,16 +259,9 @@ BUILTIN_TEMPLATES: Dict[str, Dict[str, Any]] = {
     },
     "research": {
         "description": "build-up 딥 리서치 작업용",
-        "dirs": ["deep-research", "study", "attachments"],
+        "dirs": ["deep-research", "attachments"],
         "files": {
-            "README.md": "# Research Workspace\n\n딥 리서치 실행, 근거 자료, 학습 기록을 함께 관리합니다.\n",
-        },
-    },
-    "study": {
-        "description": "개인 공부·복습 작업용",
-        "dirs": ["study", "references"],
-        "files": {
-            "README.md": "# Study Workspace\n\n설명 → 예제 → 반례 → 복습 순서로 학습합니다.\n",
+            "README.md": "# Research Workspace\n\n딥 리서치 실행과 근거 자료를 함께 관리합니다.\n",
         },
     },
     "ops": {
@@ -468,13 +461,27 @@ def resolve_job_file(
         allowed = "\n".join(f"    {root}" for root in roots)
         raise ValueError(f"허용된 경로 밖입니다: {candidate}\n  허용 범위:\n{allowed}")
 
+    matches: List[Path] = []
     for root in roots:
         try:
             path = ensure_within(root / relpath, root)
         except ValueError:
             continue
-        if path.exists():
-            return path
+        if path.exists() and path not in matches:
+            matches.append(path)
+
+    if len(matches) > 1:
+        # A file imported into the workspace and also reachable through a bind
+        # (same relpath in both) used to resolve silently to the workspace
+        # copy, so edits to the bind's original went unnoticed.  Ambiguity
+        # must be resolved explicitly instead of guessed.
+        listed = "\n".join(f"    {m}" for m in matches)
+        raise ValueError(
+            f"'{relpath}'가 여러 곳에 있어 하나로 정할 수 없습니다:\n{listed}\n"
+            f"  절대경로로 정확히 지정해주세요."
+        )
+    if matches:
+        return matches[0]
     return ensure_within(roots[0] / relpath, roots[0])
 
 

@@ -12,7 +12,6 @@ Policy goal:
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Optional
@@ -26,14 +25,6 @@ ALWAYS_CONFIRM_INTENTS = {
     # Writes outside current workspace / copies data across boundaries
     "import",
     "export",
-    # External uploads
-    "owui_sync",
-    "owui_ask",
-    # Calendar mutations
-    "cal_add",
-    "cal_delete",
-    "cal_export_ics",
-    "cal_import_ics",
     # Explicit user judgment or cross-vault state changes
     "wiki_reject",
     "wiki_bind",
@@ -125,7 +116,7 @@ def evaluate_intent_policy(
     # ── Confidence-based capability downgrade ──────────────────────────
     # 0.75–0.85: write/edit/rewrite are demoted to confirm-required
     # (below 0.75 never reaches here — embed_classifier returns None)
-    _WRITE_INTENTS = {"write", "edit_file", "rewrite", "trash", "run_shell", "git_run"}
+    _WRITE_INTENTS = {"write", "edit_file", "rewrite", "trash"}
     if confidence is not None and confidence < 0.85 and intent in _WRITE_INTENTS:
         return IntentPolicyDecision(
             auto_execute=False,
@@ -148,7 +139,7 @@ def evaluate_intent_policy(
             category="confirm-always",
         )
 
-    if intent in {"files", "job_current", "job_list", "job_summary", "templates", "cal_list", "cal_today"}:
+    if intent in {"files", "job_current", "job_list", "job_summary", "templates"}:
         return IntentPolicyDecision(
             auto_execute=True,
             reason="로컬 조회 전용 작업입니다.",
@@ -322,42 +313,9 @@ def evaluate_intent_policy(
             category="safe-readonly",
         )
 
-    if intent == "run_shell":
-        command = str(params.get("command", "") or "").strip()
-        if command:
-            return IntentPolicyDecision(
-                auto_execute=False,
-                reason="코드·프로세스 실행은 정확한 명령을 확인한 뒤 승인이 필요합니다.",
-                category="confirm-shell",
-            )
-        return IntentPolicyDecision(
-            auto_execute=False,
-            reason="실행할 명령이 비어 있습니다.",
-            category="ambiguous",
-        )
-
-    if intent == "git_run":
-        args = str(params.get("args", "") or "").strip()
-        # Read-only git commands auto-execute; write commands need confirmation
-        _READONLY_GIT = re.compile(
-            r"^(status|log|diff|show|branch|tag|remote\s+-v|stash\s+list|shortlog|describe)",
-            re.I,
-        )
-        if _READONLY_GIT.match(args):
-            return IntentPolicyDecision(
-                auto_execute=True,
-                reason="읽기 전용 git 명령입니다.",
-                category="safe-readonly",
-            )
-        return IntentPolicyDecision(
-            auto_execute=False,
-            reason="git 쓰기 명령은 확인이 필요합니다.",
-            category="confirm-git",
-        )
-
     if intent == "job_use":
         job_id = str(params.get("job_id", "") or "").strip()
-        if _safe_job_id(job_id):
+        if not job_id or _safe_job_id(job_id):
             return IntentPolicyDecision(
                 auto_execute=True,
                 reason="활성 job 전환은 로컬 상태만 바꾸는 비파괴 작업입니다.",
@@ -367,6 +325,13 @@ def evaluate_intent_policy(
             auto_execute=False,
             reason="job_id가 안전한 형식으로 확인되지 않았습니다.",
             category="unsafe-path",
+        )
+
+    if intent == "session_resume":
+        return IntentPolicyDecision(
+            auto_execute=True,
+            reason="세션 선택기 열기는 로컬 상태만 바꾸는 비파괴 작업입니다.",
+            category="safe-local-state",
         )
 
     return IntentPolicyDecision(

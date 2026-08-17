@@ -325,7 +325,6 @@ class PlanStateMachine:
             f"날짜: {ctx['date_ctx']}",
             f"현재 job: {ctx['current_job']}",
             f"파일 목록: {ctx['file_list']}",
-            f"다가오는 일정: {ctx['upcoming']}",
         ]
         if ctx.get("job_prefs"):
             ctx_lines.append(f"\n[프로젝트 컨텍스트 (.buildup.md)]\n{ctx['job_prefs']}")

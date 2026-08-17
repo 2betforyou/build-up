@@ -7,15 +7,6 @@ import signal
 
 from rich.markup import escape
 
-from buildup.calendar_mgr import (
-    cal_add,
-    cal_delete,
-    cal_export_ics,
-    cal_import_ics,
-    cal_list,
-    cal_today,
-    format_events,
-)
 from buildup.config import load_config
 from buildup.http_client import build_session
 from buildup.jobs import (
@@ -38,14 +29,8 @@ from buildup.jobs import (
 from buildup.logging_setup import setup_logging
 from buildup.ollama import (
     answer_query,
-    auto_route,
     chat,
     rewrite_file,
-)
-from buildup.openwebui import (
-    ask_openwebui_with_kb,
-    extract_chat_completion_text,
-    sync_job_to_openwebui,
 )
 from buildup.paths import (
     compute_diff,
@@ -118,23 +103,13 @@ from buildup.session_store import (
     workspace_key_for,
     workspace_label,
 )
-from buildup.study import (
-    append_study_note,
-    close_study,
-    complete_study_review,
-    due_studies,
-    format_study_list,
-    list_studies,
-    resolve_study,
-    start_study,
-)
 from buildup import COMMAND_NAME, PRODUCT_NAME, __version__
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog=COMMAND_NAME,
-        description=f"{PRODUCT_NAME} — local deep-research agent and study coach",
+        description=f"{PRODUCT_NAME} — local deep-research agent",
     )
     parser.add_argument("--version", action="version", version=f"{PRODUCT_NAME} {__version__}")
     sub = parser.add_subparsers(dest="command")
@@ -303,59 +278,8 @@ def main() -> None:
     session_rename.add_argument("selector")
     session_rename.add_argument("title", nargs="+")
 
-    study_p = sub.add_parser("study", help="manage personal study sessions")
-    study_sub = study_p.add_subparsers(dest="study_command")
-    study_start = study_sub.add_parser("start")
-    study_start.add_argument("topic", nargs="+")
-    study_sub.add_parser("list")
-    study_use = study_sub.add_parser("use")
-    study_use.add_argument("selector", nargs="?", default="latest")
-    study_note = study_sub.add_parser("note")
-    study_note.add_argument("text", nargs="+")
-    study_close = study_sub.add_parser("close")
-    study_close.add_argument("reflection", nargs="*")
-    study_review = study_sub.add_parser("review")
-    study_review.add_argument("selector", nargs="?", default="")
-    study_review.add_argument("--done", action="store_true", help="complete the earliest due review")
-    study_status = study_sub.add_parser("status")
-    study_status.add_argument("selector", nargs="?", default="latest")
-    study_verify = study_sub.add_parser("verify")
-    study_verify.add_argument("claim_id")
-    study_verify.add_argument(
-        "--reason", default="learner directly explained and checked this claim"
-    )
-
     translate_p = sub.add_parser("translate", help="translate a research PDF into Korean Markdown")
     translate_p.add_argument("source", help="current-job PDF path or paper-library id")
-
-    owui_p = sub.add_parser("owui", help="Open WebUI integration")
-    owui_sub = owui_p.add_subparsers(dest="owui_command")
-    owui_sync = owui_sub.add_parser("sync")
-    owui_sync.add_argument("kb_key", choices=["research", "coding", "ops"])
-    owui_sync.add_argument("--job")
-    owui_ask = owui_sub.add_parser("ask")
-    owui_ask.add_argument("kb_key", choices=["research", "coding", "ops"])
-    owui_ask.add_argument("question", nargs="+")
-    owui_ask.add_argument("--mode", choices=["auto", "fast", "main", "refine"], default="auto")
-
-    cal_p = sub.add_parser("cal", help="calendar management")
-    cal_sub = cal_p.add_subparsers(dest="cal_command")
-    cal_add_p = cal_sub.add_parser("add")
-    cal_add_p.add_argument("date")
-    cal_add_p.add_argument("title", nargs="+")
-    cal_add_p.add_argument("--time")
-    cal_add_p.add_argument("--duration", type=int, default=60)
-    cal_add_p.add_argument("--note", default="")
-    cal_list_p = cal_sub.add_parser("list")
-    cal_list_p.add_argument("--days", type=int, default=7)
-    cal_list_p.add_argument("--from", dest="date_from")
-    cal_list_p.add_argument("--to", dest="date_to")
-    cal_sub.add_parser("today")
-    cal_del_p = cal_sub.add_parser("delete")
-    cal_del_p.add_argument("event_id")
-    cal_sub.add_parser("export")
-    cal_imp_p = cal_sub.add_parser("import")
-    cal_imp_p.add_argument("ics_path")
 
     args = parser.parse_args()
 
@@ -794,88 +718,6 @@ def main() -> None:
                     raise ValueError("같은 workspace에 동일한 제목이 있거나 제목이 올바르지 않습니다.")
                 render_info("Session", f"이름 변경: {title}", "green")
 
-        elif args.command == "study":
-            command = args.study_command or "list"
-            jid = get_current_job(cfg, required=False)
-            if command == "start":
-                topic = " ".join(args.topic)
-                if not jid:
-                    jid, _ = cmd_job_new(f"study-{topic[:24]}", cfg, "study")
-                latest = latest_completed_research_run(jid, cfg)
-                source = resolve_path(str(latest["run_dir"])) if latest else None
-                info = start_study(topic, jid, cfg, source_research=source)
-                append_action_log(jid, cfg, "study_start", info.study_id)
-                render_info("Study Started", f"{info.topic}\n{info.path}\nnext: {info.next_action}", "green")
-            else:
-                if not jid:
-                    raise ValueError("현재 job이 없습니다.")
-                if command == "list":
-                    render_info("Studies", format_study_list(list_studies(jid, cfg)), "cyan")
-                elif command == "review":
-                    if args.done:
-                        info = resolve_study(args.selector or "latest", jid, cfg)
-                        if not info:
-                            raise ValueError(f"공부 세션을 찾지 못했습니다: {args.selector}")
-                        updated, review_date = complete_study_review(info, cfg)
-                        append_action_log(jid, cfg, "study_review", f"{updated.study_id}:{review_date}")
-                        render_info("Study Review", f"{review_date} 회차 완료\nnext: {updated.next_action}", "green")
-                    elif args.selector:
-                        info = resolve_study(args.selector, jid, cfg)
-                        if not info:
-                            raise ValueError(f"공부 세션을 찾지 못했습니다: {args.selector}")
-                        render_info(
-                            "Study Review",
-                            f"{info.topic}\n노트를 열기 전에 핵심 개념을 자료 없이 설명하세요.\n{info.path}",
-                            "cyan",
-                        )
-                    else:
-                        render_info("Due Reviews", format_study_list(due_studies(jid, cfg)), "cyan")
-                elif command == "status":
-                    info = resolve_study(args.selector, jid, cfg)
-                    if not info:
-                        raise ValueError(f"공부 세션을 찾지 못했습니다: {args.selector}")
-                    render_info(
-                        "Study",
-                        f"{info.topic} · {info.status}\nverified: {info.verified_notes_count}\n"
-                        f"reviews: {len(info.completed_reviews)}/{len(info.review_dates)}\n"
-                        f"next: {info.next_action}\n{info.path}",
-                        "cyan",
-                    )
-                elif command == "verify":
-                    study_info = resolve_study("latest", jid, cfg)
-                    if not study_info:
-                        raise ValueError(
-                            "Study 검증 승격에는 해당 job의 공부 세션이 필요합니다."
-                        )
-                    claim = verify_claim(
-                        args.claim_id,
-                        jid,
-                        cfg,
-                        reason=args.reason,
-                        via=f"study:{study_info.study_id}",
-                    )
-                    append_action_log(jid, cfg, "study_verify_claim", claim["claim_id"])
-                    render_info(
-                        "Study → Knowledge Verified",
-                        f"{claim['claim_id']}\n{escape(str(claim['text']))}",
-                        "green",
-                    )
-                else:
-                    selector = getattr(args, "selector", "latest")
-                    info = resolve_study(selector, jid, cfg)
-                    if not info:
-                        raise ValueError(f"공부 세션을 찾지 못했습니다: {selector}")
-                    if command == "use":
-                        render_info("Study", f"{info.topic}\nnext: {info.next_action}\n{info.path}", "cyan")
-                    elif command == "note":
-                        updated = append_study_note(info, " ".join(args.text), cfg)
-                        append_action_log(jid, cfg, "study_note", updated.study_id)
-                        render_info("Verified Note", f"저장 완료 · {updated.verified_notes_count}", "green")
-                    elif command == "close":
-                        closed = close_study(info, cfg, " ".join(args.reflection))
-                        append_action_log(jid, cfg, "study_close", closed.study_id)
-                        render_info("Study Closed", closed.next_action, "green")
-
         elif args.command == "translate":
             current_job = get_current_job(cfg, required=False)
             target = resolve_translation_target(args.source, cfg, current_job=current_job)
@@ -893,50 +735,6 @@ def main() -> None:
                 "green",
             )
 
-        elif args.command == "cal":
-            if args.cal_command == "add":
-                title = " ".join(args.title)
-                ev = cal_add(title, args.date, args.time, args.duration, args.note, cfg)
-                render_info("Calendar", f"추가됨: {ev['title']}  📅 {ev['date']} {ev.get('time','종일')}")
-            elif args.cal_command == "list":
-                events = cal_list(cfg, date_from=args.date_from, date_to=args.date_to, upcoming_days=args.days)
-                render_info("Calendar", format_events(events), "cyan")
-            elif args.cal_command == "today":
-                render_info("오늘 일정", format_events(cal_today(cfg)), "cyan")
-            elif args.cal_command == "delete":
-                removed = cal_delete(args.event_id, cfg)
-                if removed:
-                    render_info("Calendar", f"삭제됨: {removed['title']}")
-                else:
-                    render_info("Calendar", "해당 ID 없음", "yellow")
-            elif args.cal_command == "export":
-                ics_path = cal_export_ics(cfg)
-                render_info("Calendar", f"ICS 내보내기 완료\n{ics_path}")
-            elif args.cal_command == "import":
-                path = resolve_path(args.ics_path)
-                count = cal_import_ics(path, cfg)
-                render_info("Calendar", f"{count}개 일정 가져오기 완료")
-            else:
-                raise ValueError("cal 하위 명령: add / list / today / delete / export / import")
-
-        elif args.command == "owui":
-            if args.owui_command == "sync":
-                jid = args.job or get_current_job(cfg, required=True)
-                synced = sync_job_to_openwebui(jid, args.kb_key, session, cfg)
-                body = "\n".join(f"{r} -> {f}" for r, f in synced) or "(no files)"
-                render_info("Open WebUI Sync", body)
-            elif args.owui_command == "ask":
-                kb_id = cfg.openwebui_kb_map.get(args.kb_key, "")
-                if not kb_id:
-                    raise ValueError(f"OPENWEBUI_KB_{args.kb_key.upper()} 환경변수가 없습니다.")
-                question = " ".join(args.question)
-                um = auto_route(question, cfg) if args.mode == "auto" else args.mode
-                model = cfg.main_model if um in {"main", "refine"} else cfg.fast_model
-                resp = ask_openwebui_with_kb(question, model, kb_id, session, cfg)
-                text = extract_chat_completion_text(resp.json())
-                render_answer(text, f"Open WebUI KB:{args.kb_key}", um)
-            else:
-                raise ValueError("owui 하위 명령: sync / ask")
         else:
             raise ValueError(f"알 수 없는 명령: {args.command}")
 

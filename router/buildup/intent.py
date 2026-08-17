@@ -24,7 +24,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
-from buildup.calendar_mgr import cal_list
 from buildup.config import BuildupConfig
 from buildup.ollama import chat
 from buildup.paths import list_files
@@ -158,205 +157,6 @@ def _resolve_time_expr(text: str) -> Optional[str]:
 # ============================================================
 # Tier 1: Rule-based intent patterns
 # ============================================================
-
-def _rule_cal_add(text: str, cfg: BuildupConfig) -> Optional[Dict[str, Any]]:
-    """Detect calendar-add intent from natural language."""
-    add_signals = (
-        r"일정\s*(추가|잡아|넣어|등록|만들어|생성)",
-        r"(잡아|넣어|추가|등록)\s*줘",
-        r"예약\s*(잡아|해|추가|넣어)",
-        r"미팅\s*(잡아|넣어|추가)",
-        r"회의\s*(잡아|넣어|추가)",
-        r"약속\s*(잡아|넣어|추가)",
-        r"스케줄\s*(잡아|넣어|추가)",
-        r"(리마인더|알림)\s*(설정|추가|등록)",
-        r"schedule|add\s*(event|meeting|appointment)",
-    )
-    if not any(re.search(pat, text, re.I) for pat in add_signals):
-        return None
-
-    date_str = _resolve_date_expr(text)
-    time_str = _resolve_time_expr(text)
-
-    if not date_str:
-        # If there's a date-like word but we couldn't parse, let LLM handle
-        return None
-
-    # Extract title: remove date/time expressions and action verbs
-    title = text
-    # Remove common date expressions
-    for pat in [
-        r"오늘|내일|모레|글피",
-        r"\d{4}-\d{1,2}-\d{1,2}",
-        r"\d{1,2}월\s*\d{1,2}일",
-        r"다음\s*주\s*\S*요일",
-        r"이번\s*주\s*\S*요일",
-        r"\S*요일",
-        r"오전|오후|아침|저녁|밤",
-        r"\d{1,2}\s*시\s*(?:\d{1,2}\s*분|반)?",
-        r"\d{1,2}:\d{2}",
-        r"\d{1,2}\s*(?:am|pm)",
-        r"에\b",
-    ]:
-        title = re.sub(pat, "", title, flags=re.I)
-    # Remove action verbs
-    for pat in [
-        r"일정\s*(추가|잡아|넣어|등록|만들어|생성)\s*(해\s*줘|줘)?",
-        r"(잡아|넣어|추가|등록|만들어|생성)\s*(해\s*줘|줘)?",
-        r"예약\s*(잡아|해|추가|넣어)\s*(줘)?",
-        r"(리마인더|알림)\s*(설정|추가|등록)\s*(해\s*줘|줘)?",
-    ]:
-        title = re.sub(pat, "", title, flags=re.I)
-    title = re.sub(r"\s+", " ", title).strip()
-    # Remove leading/trailing particles
-    title = re.sub(r"^[을를이가에서은는의로]\s*", "", title)
-    title = re.sub(r"\s*[을를이가에서은는의로]$", "", title)
-    title = title.strip()
-
-    if not title:
-        title = "일정"
-
-    # Build description
-    time_desc = time_str if time_str else "종일"
-    desc = f"{date_str} {time_desc}에 '{title}' 일정 추가"
-
-    return {
-        "intent": "cal_add",
-        "params": {
-            "title": title,
-            "date": date_str,
-            "time": time_str,
-            "duration_min": 60,
-            "note": "",
-        },
-        "description": desc,
-    }
-
-
-def _rule_cal_list(text: str, cfg: BuildupConfig) -> Optional[Dict[str, Any]]:
-    """Detect calendar-list / calendar-today intent."""
-    list_signals = (
-        r"일정\s*(보여|알려|확인|조회|뭐|있어|있나|뭐야|뭐가)",
-        r"스케줄\s*(보여|알려|확인|조회|뭐|있어|있나)",
-        r"(뭐|무슨|어떤)\s*(일정|스케줄|약속)",
-        r"일정\s*있",
-        r"(있어|있나|뭐야|뭐가).*일정",
-        r"(show|list|what).*(schedule|calendar|event|appointment)",
-    )
-    if not any(re.search(pat, text, re.I) for pat in list_signals):
-        return None
-
-    now = datetime.now()
-
-    # "오늘 일정"
-    if re.search(r"오늘|today", text, re.I):
-        today = now.strftime("%Y-%m-%d")
-        return {
-            "intent": "cal_list",
-            "params": {"date_from": today, "date_to": today},
-            "description": "오늘 일정 조회",
-        }
-
-    # "내일 일정"
-    if re.search(r"내일|tomorrow", text, re.I):
-        d = (now + timedelta(days=1)).strftime("%Y-%m-%d")
-        return {
-            "intent": "cal_list",
-            "params": {"date_from": d, "date_to": d},
-            "description": "내일 일정 조회",
-        }
-
-    # "이번 주 일정"
-    if re.search(r"이번\s*주|this\s*week", text, re.I):
-        mon = now - timedelta(days=now.weekday())
-        sun = mon + timedelta(days=6)
-        return {
-            "intent": "cal_list",
-            "params": {
-                "date_from": mon.strftime("%Y-%m-%d"),
-                "date_to": sun.strftime("%Y-%m-%d"),
-            },
-            "description": "이번 주 일정 조회",
-        }
-
-    # "다음 주 일정"
-    if re.search(r"다음\s*주|next\s*week", text, re.I):
-        next_mon = now + timedelta(days=(7 - now.weekday()))
-        next_sun = next_mon + timedelta(days=6)
-        return {
-            "intent": "cal_list",
-            "params": {
-                "date_from": next_mon.strftime("%Y-%m-%d"),
-                "date_to": next_sun.strftime("%Y-%m-%d"),
-            },
-            "description": "다음 주 일정 조회",
-        }
-
-    # Default: 향후 7일
-    return {
-        "intent": "cal_list",
-        "params": {},
-        "description": "향후 7일 일정 조회",
-    }
-
-
-def _rule_cal_delete(text: str, cfg: BuildupConfig) -> Optional[Dict[str, Any]]:
-    """Detect calendar-delete intent."""
-    delete_signals = (
-        r"일정\s*(삭제|취소|지워|없애|제거)",
-        r"(삭제|취소|지워|없애|제거)\s*(해\s*줘|줘)",
-        r"(cancel|delete|remove)\s*(event|meeting|schedule|appointment)",
-    )
-    # Must also reference a specific event somehow
-    if not any(re.search(pat, text, re.I) for pat in delete_signals):
-        return None
-
-    # Try to find event ID (8-char hex)
-    m = re.search(r"\b([0-9a-f]{8})\b", text)
-    if m:
-        return {
-            "intent": "cal_delete",
-            "params": {"event_id": m.group(1)},
-            "description": f"일정 삭제 (ID: {m.group(1)})",
-        }
-
-    # Has delete signal but no ID → needs LLM to figure out which event
-    # We'll pass to LLM with context of upcoming events
-    return None
-
-
-def _rule_cal_export(text: str, cfg: BuildupConfig) -> Optional[Dict[str, Any]]:
-    """Detect ICS export intent."""
-    if re.search(r"(일정|캘린더|calendar).*(내보내|export|ics|아이캘)", text, re.I):
-        return {
-            "intent": "cal_export_ics",
-            "params": {},
-            "description": "일정을 ICS 파일로 내보내기",
-        }
-    if re.search(r"ics\s*(내보내|export|파일)", text, re.I):
-        return {
-            "intent": "cal_export_ics",
-            "params": {},
-            "description": "일정을 ICS 파일로 내보내기",
-        }
-    return None
-
-
-def _rule_cal_import(text: str, cfg: BuildupConfig) -> Optional[Dict[str, Any]]:
-    """Detect ICS import intent."""
-    if not re.search(r"(일정|캘린더|calendar).*(가져오|import|불러)", text, re.I):
-        if not re.search(r"ics\s*(가져오|import|불러)", text, re.I):
-            return None
-
-    # Try to find a file path
-    m = re.search(r"([\w/~.\\-]+\.ics)", text)
-    path = m.group(1) if m else ""
-    return {
-        "intent": "cal_import_ics",
-        "params": {"path": path},
-        "description": f"ICS 파일 가져오기{': ' + path if path else ''}",
-    }
-
 
 _DEEP_RESEARCH_RE = re.compile(r"(?:딥\s*리서치|심층\s*리서치|deep\s*research)", re.I)
 
@@ -799,7 +599,37 @@ def _rule_job_use(text: str, cfg: BuildupConfig) -> Optional[Dict[str, Any]]:
             "params": {"job_id": m.group(1)},
             "description": f"작업 전환: {m.group(1)}",
         }
-    return None  # Let LLM handle if no ID found
+    # No explicit id in the sentence — offer a picker instead of paying for
+    # a full Tier-2 agent call just to ask "which job?".
+    return {
+        "intent": "job_use",
+        "params": {},
+        "description": "작업 목록에서 전환할 job 선택",
+    }
+
+
+_SESSION_WORD_RE = re.compile(r"(대화|세션|얘기)")
+_SESSION_TEMPORAL_RE = re.compile(r"(이전|저번|아까|지난)")
+_SESSION_ACTION_RE = re.compile(r"(목록|리스트|이어|재개|불러|열어|바꿔|전환|변경|보여)")
+_SESSION_RESUME_EN_RE = re.compile(r"\bresume\b|continue\s*(chat|session|conversation)", re.I)
+
+
+def _rule_session_resume(text: str, cfg: BuildupConfig) -> Optional[Dict[str, Any]]:
+    """Detect a request to browse or resume a past conversation.
+
+    Doesn't require the temporal/action word to sit right next to "대화/세션"
+    — "저번에 하던 세션 보여줘" should match just as well as "이전 세션".
+    """
+    matched = _SESSION_RESUME_EN_RE.search(text)
+    if not matched and _SESSION_WORD_RE.search(text):
+        matched = _SESSION_TEMPORAL_RE.search(text) or _SESSION_ACTION_RE.search(text)
+    if not matched:
+        return None
+    return {
+        "intent": "session_resume",
+        "params": {},
+        "description": "대화 목록에서 이어갈 세션 선택",
+    }
 
 
 # ============================================================
@@ -809,11 +639,6 @@ def _rule_job_use(text: str, cfg: BuildupConfig) -> Optional[Dict[str, Any]]:
 # Order matters: more specific patterns first to avoid false matches.
 _RULE_CHAIN: List[Tuple[str, Any]] = [
     ("paper_translate", _rule_paper_translate),
-    ("cal_export",  _rule_cal_export),
-    ("cal_import",  _rule_cal_import),
-    ("cal_delete",  _rule_cal_delete),
-    ("cal_add",     _rule_cal_add),
-    ("cal_list",    _rule_cal_list),
     ("search",      _rule_search),
     ("files",       _rule_files),
     ("trash",       _rule_trash),   # before rewrite/read (delete signals)
@@ -823,6 +648,7 @@ _RULE_CHAIN: List[Tuple[str, Any]] = [
     ("read",        _rule_read),
     ("export",      _rule_export),
     ("job_new",     _rule_job_new),
+    ("session_resume", _rule_session_resume),
     ("job_use",     _rule_job_use),
 ]
 
@@ -870,12 +696,6 @@ def _try_rules(text: str, cfg: BuildupConfig) -> Optional[Dict[str, Any]]:
 
 _FEW_SHOT_EXAMPLES = """
 예시:
-입력: "내일 오후 3시에 랩미팅 잡아줘"
-출력: {"intent": "cal_add", "params": {"title": "랩미팅", "date": "TOMORROW_DATE", "time": "15:00", "duration_min": 60, "note": ""}, "description": "내일 15:00에 '랩미팅' 일정 추가"}
-
-입력: "이번 주 일정 보여줘"
-출력: {"intent": "cal_list", "params": {"date_from": "WEEK_START", "date_to": "WEEK_END"}, "description": "이번 주 일정 조회"}
-
 입력: "todo.md 파일을 새로 만들어서 이 내용을 저장해줘: 논문 정리하기"
 출력: {"intent": "write", "params": {"relpath": "todo.md", "content": "논문 정리하기"}, "description": "todo.md 파일 생성 및 내용 저장"}
 
@@ -894,9 +714,6 @@ _FEW_SHOT_EXAMPLES = """
 입력: "~/Downloads/paper.pdf 가져와"
 출력: {"intent": "import", "params": {"path": "~/Downloads/paper.pdf"}, "description": "paper.pdf를 현재 job으로 가져오기"}
 
-입력: "내일 랩미팅 취소해줘"
-출력: {"intent": "cal_delete", "params": {"event_id": ""}, "description": "내일 랩미팅 일정 삭제 (ID 필요)"}
-
 입력: "LLM safety에서 logit 기반 방법론을 설명해줘"
 출력: {"intent": "chat", "params": {}, "description": "일반 대화"}
 
@@ -909,7 +726,6 @@ INTENT_SYSTEM_PROMPT_V2 = """당신은 사용자의 자연어 입력을 build-up
 {date_context}
 현재 job: {current_job}
 현재 job 파일: {file_list}
-다가오는 일정: {upcoming}
 
 사용 가능한 intent:
 - job_new: 새 작업 생성 (params: label, template)
@@ -925,12 +741,6 @@ INTENT_SYSTEM_PROMPT_V2 = """당신은 사용자의 자연어 입력을 build-up
 - deep_search: 심층 검색 + 분석 정리 (params: query, save_to_file)
 - deep_research: 근거 검증·gap 보충·인용 감사를 포함한 딥 리서치 (params: query)
 - paper_translate: 논문 PDF 한국어 번역 (params: source)
-- cal_add: 일정 추가 (params: title, date, time, duration_min, note)
-- cal_list: 일정 조회 (params: date_from, date_to)
-- cal_today: 오늘 일정 (params: 없음)
-- cal_delete: 일정 삭제 (params: event_id)
-- cal_export_ics: 일정 ICS 내보내기 (params: 없음)
-- cal_import_ics: ICS 파일 가져오기 (params: path)
 - chat: 일반 대화 (질문, 설명 요청, 의견 등 — 명령이 아닌 경우)
 
 {few_shot}
@@ -943,7 +753,6 @@ INTENT_SYSTEM_PROMPT_V2 = """당신은 사용자의 자연어 입력을 build-up
 5. 사용자가 정보를 묻거나, 설명을 요청하거나, 의견을 구하면 반드시 "chat"이다.
 6. 사용자가 research에게 무언가를 실행하라고 지시할 때만 명령 intent로 분류하라.
 7. 현재 job에 있는 파일을 언급하면 해당 파일 작업 intent로 분류하라.
-8. 일정 관련 표현("일정", "미팅", "약속", "예약" 등)이 있으면 cal_ 계열 intent를 우선 고려하라.
 """
 
 
@@ -958,19 +767,6 @@ def _build_intent_context(cfg: BuildupConfig) -> Dict[str, str]:
             file_list = ", ".join(files[:20]) if files else "(비어 있음)"
         except Exception:
             file_list = "(알 수 없음)"
-
-    upcoming = ""
-    try:
-        upcoming_events = cal_list(cfg, upcoming_days=7)
-        if upcoming_events:
-            upcoming = "; ".join(
-                f"{e['date']} {e.get('time','')} {e['title']} [id={e.get('id','')}]"
-                for e in upcoming_events[:5]
-            )
-        else:
-            upcoming = "(없음)"
-    except Exception:
-        upcoming = "(없음)"
 
     # Resolve example dates for few-shot
     tomorrow = (now + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -987,7 +783,6 @@ def _build_intent_context(cfg: BuildupConfig) -> Dict[str, str]:
         "date_context": date_context(),
         "current_job": current_job or "(없음)",
         "file_list": file_list or "(없음)",
-        "upcoming": upcoming,
         "few_shot": few_shot,
         "tomorrow": tomorrow,
         "day_after": day_after,

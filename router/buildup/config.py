@@ -36,16 +36,6 @@ class BuildupConfig:
     # limit of the smaller local models.  0 falls back to the server default.
     ollama_num_ctx: int = 65536
 
-    # Open WebUI
-    openwebui_base_url: str = "http://localhost:3000"
-    openwebui_token: str = ""
-    openwebui_kb_research: str = ""
-    openwebui_kb_coding: str = ""
-    openwebui_kb_ops: str = ""
-    openwebui_timeout: int = 600
-    openwebui_process_timeout: int = 300
-    openwebui_poll_interval: float = 2.0
-
     # File handling
     text_extensions: frozenset = frozenset({
         ".txt", ".md", ".py", ".json", ".jsonl", ".yaml", ".yml",
@@ -193,10 +183,6 @@ class BuildupConfig:
         return self.base_dir / "templates"
 
     @property
-    def calendar_dir(self) -> Path:
-        return self.base_dir / "calendar"
-
-    @property
     def library_dir(self) -> Path:
         return self.base_dir / "library"
 
@@ -233,10 +219,6 @@ class BuildupConfig:
         return self.buildup_data_dir / "search-cache"
 
     @property
-    def study_dir(self) -> Path:
-        return self.base_dir / "study"
-
-    @property
     def knowledge_dir(self) -> Path:
         return self.base_dir / "knowledge"
 
@@ -253,20 +235,12 @@ class BuildupConfig:
         return [
             self.base_dir, self.inbox_dir, self.workspace_dir,
             self.export_dir, self.trash_dir, self.logs_dir,
-            self.templates_dir, self.calendar_dir, self.library_dir,
+            self.templates_dir, self.library_dir,
             self.paper_library_dir, self.paper_index_dir, self.skills_dir,
             self.vendor_skills_dir, self.buildup_data_dir,
-            self.search_cache_dir, self.study_dir, self.knowledge_dir,
+            self.search_cache_dir, self.knowledge_dir,
             self.knowledge_vaults_dir,
         ]
-
-    @property
-    def openwebui_kb_map(self) -> Dict[str, str]:
-        return {
-            "research": self.openwebui_kb_research,
-            "coding": self.openwebui_kb_coding,
-            "ops": self.openwebui_kb_ops,
-        }
 
 
 # Deterministic model-routing weights.
@@ -274,7 +248,6 @@ ROUTING_WEIGHTS: Dict[str, int] = {
     "intent:qa": -2,
     "intent:search": -2,
     "intent:summarize": 0,
-    "intent:calendar": -1,
     "intent:file_manage": -1,
     "intent:inspect_logs": 1,
     "intent:inspect_code": 1,
@@ -344,11 +317,6 @@ def load_config() -> BuildupConfig:
         max_pdf_bytes=_env_int("BUILDUP_MAX_PDF_BYTES", 50 * 1024 * 1024),
         ollama_health_url=_env("BUILDUP_OLLAMA_HEALTH_URL", "http://localhost:11434/api/tags"),
         ollama_num_ctx=_env_int("BUILDUP_OLLAMA_NUM_CTX", 65536),
-        openwebui_base_url=_env("OPENWEBUI_BASE_URL", "http://localhost:3000"),
-        openwebui_token=_env("OPENWEBUI_TOKEN", ""),
-        openwebui_kb_research=_env("OPENWEBUI_KB_RESEARCH", ""),
-        openwebui_kb_coding=_env("OPENWEBUI_KB_CODING", ""),
-        openwebui_kb_ops=_env("OPENWEBUI_KB_OPS", ""),
         search_provider=_env("BUILDUP_SEARCH_PROVIDER", "auto"),
         search_timeout=_env_int("BUILDUP_SEARCH_TIMEOUT", 30),
         search_cache_ttl_hours=_env_int("BUILDUP_SEARCH_CACHE_TTL_HOURS", 24),

@@ -16,11 +16,9 @@ import requests
 
 from buildup import COMMAND_NAME, PRODUCT_NAME
 from buildup.cli import main as cli_main
-from buildup.command_runner import UnsafeCommandError, parse_command, run_command
 from buildup.config import BuildupConfig, load_config
 from buildup.deep_research import run_deep_research
 from buildup.doctor import run_doctor
-from buildup.git_mgr import RequiresConfirmation, UnsafeGitCommand, git_run
 from buildup.paper_source import _download_pdf
 from buildup.research.engine import create_state
 from buildup.research.providers import (
@@ -54,80 +52,6 @@ class _OllamaSession:
 
 
 class ReleaseReadinessTests(unittest.TestCase):
-    def test_power_user_commands_never_invoke_shell_syntax(self) -> None:
-        blocked = (
-            "echo safe; python3 -c 'print(1)'",
-            "echo safe && date",
-            "echo $(id)",
-            "echo safe > result.txt",
-            "/tmp/ls -la",
-        )
-        for command in blocked:
-            with self.subTest(command=command), self.assertRaises(UnsafeCommandError):
-                parse_command(command)
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            completed = run_command("echo build-up-safe", Path(temp_dir))
-            limited = run_command(
-                "python3 -c \"print('x' * 2000)\"",
-                Path(temp_dir),
-                max_output_bytes=64,
-            )
-        self.assertEqual(0, completed.returncode)
-        self.assertEqual("build-up-safe", completed.output)
-        self.assertTrue(limited.output_limit_reached)
-        self.assertIn("output limit reached", limited.output)
-
-    def test_agent_process_tools_require_explicit_capability_approval(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            cfg = BuildupConfig(base_dir=Path(temp_dir))
-            context = ToolContext(
-                cfg=cfg,
-                session=requests.Session(),
-                logger=logging.getLogger("test"),
-                mode="fast",
-                last_file=None,
-            )
-            blocked, _ = execute_tool(
-                "run_shell", {"command": "echo should-not-run"}, context,
-            )
-            approved, _ = execute_tool(
-                "run_shell",
-                {"command": "echo approved"},
-                ToolContext(
-                    cfg=cfg,
-                    session=context.session,
-                    logger=context.logger,
-                    mode="fast",
-                    last_file=None,
-                    approved_capabilities=frozenset({"confirm-shell"}),
-                ),
-            )
-        self.assertTrue(blocked.startswith("[차단]"))
-        self.assertIn("명시적 승인", blocked)
-        self.assertIn("[exit 0]\napproved", approved)
-
-    def test_git_runner_blocks_global_options_aliases_and_external_helpers(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            repo = Path(temp_dir)
-            _, init_code = git_run("init", repo)
-            self.assertEqual(0, init_code)
-            _, status_code = git_run("status", repo)
-            self.assertEqual(0, status_code)
-
-            unsafe = (
-                "-c alias.pwn=!id pwn",
-                "difftool",
-                "bisect run id",
-                "remote add origin ext::sh -c id",
-                "status; id",
-            )
-            for args in unsafe:
-                with self.subTest(args=args), self.assertRaises(UnsafeGitCommand):
-                    git_run(args, repo)
-            with self.assertRaises(RequiresConfirmation):
-                git_run("reset --hard", repo)
-
     def test_help_and_version_do_not_create_runtime_state(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             for flag in ("--help", "--version"):
@@ -180,6 +104,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         ]
         public_files = [
             project_root / "README.md",
+            project_root / "README.en.md",
             project_root / "CHANGELOG.md",
             project_root / "CONTRIBUTING.md",
             project_root / "SECURITY.md",
@@ -562,7 +487,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 reviewer_model="reviewer-model",
                 tavily_api_key="configured",
             )
-            for name in ("deep-research", "personal-study-coach", "paper-pdf-translation"):
+            for name in ("deep-research", "paper-pdf-translation"):
                 directory = cfg.skills_dir / name
                 directory.mkdir(parents=True, exist_ok=True)
                 (directory / "SKILL.md").write_text(
@@ -617,7 +542,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             builtins = load_skills(cfg, refresh=True)
             names = {skill.name for skill in builtins}
             self.assertTrue(
-                {"deep-research", "personal-study-coach", "paper-pdf-translation"} <= names
+                {"deep-research", "paper-pdf-translation"} <= names
             )
 
             local = cfg.skills_dir / "deep-research"

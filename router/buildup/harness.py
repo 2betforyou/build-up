@@ -71,22 +71,6 @@ DEFAULT_CASES: tuple[HarnessCase, ...] = (
         expected_intent="chat",
     ),
     HarnessCase(
-        name="calendar_list_rule",
-        text="이번 주 일정 보여줘",
-        expected_tier="1a",
-        expected_intent="cal_list",
-        expected_policy_auto=True,
-        expected_policy_category="safe-readonly",
-    ),
-    HarnessCase(
-        name="calendar_add_confirm",
-        text="내일 오후 3시에 랩미팅 잡아줘",
-        expected_tier="1a",
-        expected_intent="cal_add",
-        expected_policy_auto=False,
-        expected_policy_category="confirm-always",
-    ),
-    HarnessCase(
         name="web_search_rule",
         text="LLM safety 검색해줘",
         expected_tier="1a",

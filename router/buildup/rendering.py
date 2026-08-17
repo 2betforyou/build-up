@@ -238,14 +238,14 @@ def render_research_banner(
             ("", "default"),
             (" phase         RESEARCH", BUILDUP_LABEL),
             (" workspace     deep research cockpit", BUILDUP_LABEL),
-            (" focus         cited research -> personal study", "default"),
+            (" focus         cited, source-grounded research", "default"),
             (f" research model {research_model}", "default"),
             (f" reviewer      {reviewer_model} ({reviewer_state})", "default"),
             (f" active paper  {_display_job_name(active_paper, max_len=56)}", "default"),
-            (" sessions      workspace-scoped research / study transcripts", "default"),
+            (" sessions      workspace-scoped research transcripts", "default"),
             ("", "default"),
             (" build-up commands", HEADER_DIM),
-            (" /research   /wiki   /study   /sessions   /translate   daytime", "default"),
+            (" /research   /wiki   /sessions   /translate   daytime", "default"),
             ("", "default"),
         ]
     )
@@ -273,13 +273,13 @@ def render_day_banner(
             ("", "default"),
             (" phase         DAYTIME", DAY_LABEL),
             (" workspace     everyday command desk", DAY_LABEL),
-            (" focus         files / calendar / search / lightweight work", "default"),
+            (" focus         files / search / lightweight work", "default"),
             (f" fast model    {fast_model}", "default"),
             (f" main model    {main_model}", "default"),
             (f" active job    {job_str}", "default"),
             ("", "default"),
             (" day commands", HEADER_DIM),
-            (" /files   /cal today   /search   /job list   research", "default"),
+            (" /files   /search   /job list   research", "default"),
             ("", "default"),
         ]
     )
@@ -735,17 +735,7 @@ def help_text() -> str:
         "/trash RELPATH                     Move file to trash\n"
         "/export [DEST]                     Export current job\n"
         "\n"
-        "── Calendar ──\n"
-        "/cal add DATE [TIME] title [-- note]  Add event\n"
-        "/cal list [days|FROM TO]           List events (default 7 days)\n"
-        "/cal today                         Today's events\n"
-        "/cal delete ID                     Delete event\n"
-        "/cal export                        Export ICS (Apple Calendar etc.)\n"
-        "/cal import PATH.ics               Import ICS\n"
-        "\n"
-        "── Code / Shell / Git ──\n"
-        "/shell CMD                         Run allowed shell command (ls, python, pytest, git…)\n"
-        "/git ARGS                          Run git command (status, diff, add, commit, log…)\n"
+        "── Code editing ──\n"
         "/edit RELPATH :: OLD :: NEW        Precise string replacement in file (shows diff)\n"
         "/glob PATTERN                      Glob search in job folder (e.g. **/*.py)\n"
         "/grep PATTERN [-- PATH_GLOB]       Regex search in file contents\n"
@@ -769,15 +759,6 @@ def help_text() -> str:
         "/wiki rollback PROPOSAL_ID         Append a non-destructive rollback event\n"
         "/wiki bind VAULT_ID                Explicitly share/bind a vault (confirmation)\n"
         "\n"
-        "── Personal study (secondary) ──\n"
-        "/study start TOPIC                 Start a Socratic study session\n"
-        "/study list|use NUMBER             List/resume study sessions\n"
-        "/study note TEXT                   Save a learner-verified note\n"
-        "/study status|close|review         Status, close, or due reviews\n"
-        "/study review NUMBER              Start retrieval-first review\n"
-        "/study review done                Complete the current due review\n"
-        "/study verify CLAIM_ID             Promote a directly checked claim to verified\n"
-        "\n"
         "── Conversation / Search ──\n"
         "/history                           Show conversation history\n"
         "/history clear                     Preserve log and start a new session\n"
@@ -785,10 +766,6 @@ def help_text() -> str:
         "/undo                              Remove last chat turn only\n"
         "/retry                             Retry last ordinary chat turn\n"
         "/compact                           Summarize old active context (full log kept)\n"
-        "\n"
-        "── Open WebUI ──\n"
-        "/owui sync KBKEY                   Upload job to KB\n"
-        "/owui ask KBKEY :: question        Ask KB-based question\n"
         "\n"
         "── Session management ──\n"
         "/new                               Start a clean conversation\n"
@@ -803,8 +780,7 @@ def help_text() -> str:
         "Natural language: 새 대화 · 대화 목록 · 2번 대화 이어서\n"
         "\n"
         "You can also use natural language:\n"
-        "   \"Schedule a meeting tomorrow at 2pm\"\n"
         "   \"Import draft.md and polish the writing style\"\n"
-        "   \"Show this week's schedule\"\n"
+        "   \"Resume my last conversation\"\n"
         "   → build-up infers intent and confirms before any write actions.\n"
     )
